@@ -45,10 +45,29 @@ java -cp ".;lib\sqlite-jdbc-3.42.0.0.jar" PharmacyInventorySystem
 
 ✅ This creates or uses `pharmacy.db` in the app folder. Medicines added through the app will be saved there and loaded again next time.
 
+On Windows, you can also use:
+```bash
+build-app.bat
+run-app.bat
+```
+
 You can also use Maven because this project includes `pom.xml` with the SQLite dependency:
 ```bash
 mvn compile exec:java
 ```
+
+📦 Build a runnable jar:
+```bash
+mvn clean package
+```
+
+▶️ Run the packaged app:
+```bash
+java -jar target/pharmacy-inventory-system.jar
+```
+
+The packaged jar includes the SQLite dependency automatically.
+This Maven option requires Maven to be installed.
 
 ---
 
