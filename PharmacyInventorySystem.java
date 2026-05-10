@@ -77,39 +77,37 @@ public class PharmacyInventorySystem extends JFrame {
             public void paintIcon(Component c,Graphics g,int x,int y) {
                 Graphics2D g2=(Graphics2D)g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(color); g2.setStroke(new BasicStroke(1.8f));
+                g2.setColor(color); g2.setStroke(new BasicStroke(1.8f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
                 g2.translate(x,y);
                 switch(type) {
                     case 0: // House
-                        g2.fillPolygon(new int[]{9,1,17},new int[]{1,8,8},3);
-                        g2.fillRect(3,8,12,9); g2.setColor(PINK_BG);
-                        g2.fillRect(7,11,4,6); break;
+                        g2.drawLine(2,9,9,3);g2.drawLine(9,3,16,9);
+                        g2.drawRoundRect(4,8,10,8,2,2);g2.drawLine(8,16,8,12);g2.drawLine(10,12,10,16); break;
                     case 1: // Pill capsule
-                        g2.fillRoundRect(1,5,16,8,8,8);
-                        g2.setColor(PINK_BG); g2.drawLine(9,5,9,13); break;
+                        g2.rotate(-Math.PI/4,9,9);
+                        g2.drawRoundRect(2,5,14,8,8,8);g2.drawLine(9,5,9,13); break;
                     case 2: // Receipt
-                        g2.drawRoundRect(3,1,12,15,3,3);
-                        g2.drawLine(6,5,12,5); g2.drawLine(6,8,12,8); g2.drawLine(6,11,10,11); break;
+                        g2.drawRoundRect(4,2,10,14,2,2);
+                        g2.drawLine(7,6,12,6); g2.drawLine(7,9,12,9); g2.drawLine(7,12,10,12); break;
                     case 3: // Shopping cart
-                        g2.drawPolyline(new int[]{1,4,5,15,14},new int[]{2,2,12,12,5},5);
-                        g2.fillOval(5,14,3,3); g2.fillOval(12,14,3,3); break;
+                        g2.drawPolyline(new int[]{2,5,6,15,14},new int[]{3,3,12,12,6},5);
+                        g2.drawLine(7,7,15,7);g2.fillOval(6,15,2,2); g2.fillOval(13,15,2,2); break;
                     case 4: // Bell
-                        g2.fillArc(3,2,12,12,0,180);
-                        g2.fillRect(3,8,12,5); g2.fillRect(1,13,16,2);
-                        g2.fillOval(7,15,4,3); break;
+                        g2.drawArc(4,3,10,8,0,180);g2.drawLine(4,7,4,12);g2.drawLine(14,7,14,12);
+                        g2.drawLine(2,12,16,12);g2.fillOval(8,15,2,2); break;
                     case 5: // Bar chart
-                        g2.fillRect(2,10,4,7); g2.fillRect(7,5,4,12); g2.fillRect(12,1,4,16); break;
+                        g2.drawRoundRect(3,10,2,6,1,1); g2.drawRoundRect(8,5,2,11,1,1); g2.drawRoundRect(13,2,2,14,1,1); break;
                     case 6: // Person
-                        g2.fillOval(6,1,6,6); g2.fillArc(3,9,12,10,0,180); break;
+                        g2.drawOval(6,3,6,6); g2.drawArc(3,10,12,7,0,180); break;
                     case 7: // Gear
-                        g2.fillOval(5,5,8,8);
-                        g2.setColor(PINK_BG); g2.fillOval(7,7,4,4); g2.setColor(color);
-                        for(int i=0;i<6;i++){double a=Math.toRadians(i*60);
-                            g2.fillRect((int)(9+Math.cos(a)*7)-2,(int)(9+Math.sin(a)*7)-2,4,4);} break;
+                        g2.drawOval(6,6,6,6);g2.drawOval(4,4,10,10);
+                        for(int i=0;i<8;i++){double a=Math.toRadians(i*45);
+                            int x1=(int)(9+Math.cos(a)*6),y1=(int)(9+Math.sin(a)*6);
+                            int x2=(int)(9+Math.cos(a)*8),y2=(int)(9+Math.sin(a)*8);
+                            g2.drawLine(x1,y1,x2,y2);} break;
                     case 8: // Logout arrow
-                        g2.drawRect(2,2,8,14); g2.setColor(PINK_BG); g2.fillRect(6,3,4,13);
-                        g2.setColor(color);
-                        g2.drawLine(8,9,17,9); g2.drawLine(14,6,17,9); g2.drawLine(14,12,17,9); break;
+                        g2.drawRoundRect(3,3,8,12,2,2);
+                        g2.drawLine(8,9,16,9); g2.drawLine(13,6,16,9); g2.drawLine(13,12,16,9); break;
                 }
                 g2.dispose();
             }
@@ -159,8 +157,8 @@ public class PharmacyInventorySystem extends JFrame {
         return new Icon(){public int getIconWidth(){return 16;}public int getIconHeight(){return 16;}
             public void paintIcon(Component c,Graphics g,int x,int y){
                 Graphics2D g2=(Graphics2D)g.create();g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(GRAY);g2.setStroke(new BasicStroke(1.4f));g2.translate(x,y);
-                if(type==0){g2.drawRoundRect(2,3,12,11,2,2);g2.drawLine(2,7,14,7);g2.fillRect(5,1,2,3);g2.fillRect(10,1,2,3);}
+                g2.setColor(GRAY);g2.setStroke(new BasicStroke(1.4f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));g2.translate(x,y);
+                if(type==0){g2.drawRoundRect(2,3,12,11,2,2);g2.drawLine(2,7,14,7);g2.drawLine(5,1,5,5);g2.drawLine(11,1,11,5);}
                 else{g2.drawOval(1,1,14,14);g2.drawLine(8,4,8,8);g2.drawLine(8,8,11,10);}
                 g2.dispose();}};
     }

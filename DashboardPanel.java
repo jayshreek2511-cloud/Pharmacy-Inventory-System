@@ -1,6 +1,7 @@
 import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.table.*;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.*;
@@ -24,18 +25,38 @@ public class DashboardPanel extends JPanel {
     private static final Font FB13=new Font("Segoe UI",Font.BOLD,13);
     private static final Font FB16=new Font("Segoe UI",Font.BOLD,16);
     private static final Font FB28=new Font("Segoe UI",Font.BOLD,28);
-    private DefaultTableModel model;
-    private JTable table;
-    private TableRowSorter<DefaultTableModel> sorter;
+    private static DefaultTableModel sharedTableModel;
+    private static JTable sharedTable;
+    private static int currentPage = 1;
+    private JTable medicinesTable;
+    private JLabel showingLabel;
     private JLabel totalLbl,expLbl,lowLbl,revLbl;
     private JPanel pagPanel;
-    private int currentPage=1;
     static final int RPP=5;
     private String[] cols={"ID","Medicine Name","Category","Stock","Price (\u20b9)","Expiry Date","Status","Action"};
-    static java.util.ArrayList<Object[]> medicineData=new java.util.ArrayList<>();
+
+    private static void initializeSharedTable() {
+        if(sharedTableModel != null && sharedTable != null) return;
+        String[] columns = {"ID","Medicine Name","Category","Stock","Price (\u20b9)","Expiry Date","Status","Action"};
+        sharedTableModel = new DefaultTableModel(columns, 0){
+            public boolean isCellEditable(int r, int c){ return c == 7; }
+        };
+        sharedTableModel.addRow(new Object[]{1001,"Dolo 650","Tablet",28,"35.00","Jan 2027","In Stock",""});
+        sharedTableModel.addRow(new Object[]{1002,"Paracetamol","Tablet",50,"20.00","Dec 2026","In Stock",""});
+        sharedTableModel.addRow(new Object[]{1003,"Amoxicillin 500mg","Capsule",15,"60.00","Aug 2026","Low Stock",""});
+        sharedTableModel.addRow(new Object[]{1004,"Azithromycin 250","Tablet",9,"45.00","Jul 2026","Low Stock",""});
+        sharedTableModel.addRow(new Object[]{1005,"Cetrizine 10mg","Tablet",2,"18.00","Jun 2026","Critical",""});
+        sharedTableModel.addRow(new Object[]{1006,"Ibuprofen 400mg","Tablet",35,"30.00","Mar 2027","In Stock",""});
+        sharedTableModel.addRow(new Object[]{1007,"Metformin 500mg","Tablet",60,"25.00","Feb 2027","In Stock",""});
+        sharedTableModel.addRow(new Object[]{1008,"Omeprazole 20mg","Capsule",5,"45.00","Sep 2026","Critical",""});
+        sharedTableModel.addRow(new Object[]{1009,"Atorvastatin 10mg","Tablet",22,"55.00","Nov 2026","In Stock",""});
+        sharedTableModel.addRow(new Object[]{1010,"Pantoprazole 40mg","Capsule",8,"40.00","Oct 2026","Low Stock",""});
+        sharedTable = new JTable(sharedTableModel);
+    }
 
     public DashboardPanel() {
         setLayout(new BorderLayout()); setOpaque(false);
+        initializeSharedTable();
         initModel();
         JPanel top=new JPanel(new BorderLayout()); top.setOpaque(false);
         top.add(buildStatCards(),BorderLayout.NORTH);
@@ -48,26 +69,28 @@ public class DashboardPanel extends JPanel {
     }
 
     private void initModel() {
-        model=new DefaultTableModel(cols,0){
-            public boolean isCellEditable(int r,int c){return c==7;}
-        };
-        if(medicineData.isEmpty()){
-            medicineData.add(new Object[]{"1001","Dolo 650","Tablet","28","35.00","Jan 2027",status(28),""});
-            medicineData.add(new Object[]{"1002","Paracetamol","Tablet","50","20.00","Dec 2026",status(50),""});
-            medicineData.add(new Object[]{"1003","Amoxicillin 500mg","Capsule","15","60.00","Aug 2026",status(15),""});
-            medicineData.add(new Object[]{"1004","Azithromycin 250","Tablet","9","45.00","Jul 2026",status(9),""});
-            medicineData.add(new Object[]{"1005","Cetrizine 10mg","Tablet","2","18.00","Jun 2026",status(2),""});
-        }
-        table=new JTable(model);
-        sorter=new TableRowSorter<>(model);
-        table.setRowSorter(sorter);
+        styleTable(sharedTable);
+        TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(sharedTableModel);
+        sharedTable.setRowSorter(sorter);
         refreshTable();
     }
     void refreshTable(){
-        model.setRowCount(0);
-        int start=(currentPage-1)*RPP, end=Math.min(start+RPP,medicineData.size());
-        for(int i=start;i<end;i++) model.addRow(medicineData.get(i));
-        if(pagPanel!=null) refreshPagination();
+        int totalRows = sharedTableModel.getRowCount();
+        int start = (currentPage - 1) * RPP;
+        int end = Math.min(start + RPP, totalRows);
+
+        TableRowSorter<DefaultTableModel> sorter = (TableRowSorter<DefaultTableModel>) sharedTable.getRowSorter();
+        sorter.setRowFilter(new RowFilter<DefaultTableModel, Object>() {
+            public boolean include(Entry e) {
+                int row = (int) e.getIdentifier();
+                return row >= start && row < end;
+            }
+        });
+
+        if(showingLabel != null) {
+            showingLabel.setText("Showing " + (start + 1) + " to " + end + " of " + totalRows + " entries");
+        }
+        if(pagPanel != null) refreshPagination();
     }
 
     static String status(int s){return s>20?"In Stock":s>=10?"Low Stock":"Critical";}
@@ -76,16 +99,16 @@ public class DashboardPanel extends JPanel {
         JPanel row=new JPanel(new GridLayout(1,4,12,0)); row.setOpaque(false);
         row.setPreferredSize(new Dimension(0,130));
         row.setMinimumSize(new Dimension(0,120));
-        totalLbl=new JLabel(String.valueOf(model.getRowCount()));
+        totalLbl=new JLabel(String.valueOf(sharedTableModel.getRowCount()));
         expLbl=new JLabel("5"); lowLbl=new JLabel("8"); revLbl=new JLabel("₹12,450");
-        row.add(statCard("📦","Total Medicines",totalLbl,new Color(0xFF,0x98,0x00),"All medicines in stock",new Color(0x4C,0xAF,0x50),CARD1_BG));
-        row.add(statCard("⏳","Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Within next 30 days",new Color(0xFF,0x98,0x00),CARD2_BG));
-        row.add(statCard("⚠️","Low Stock",lowLbl,new Color(0x7B,0x1F,0xA2),"Stock below minimum",new Color(0x9E,0x9E,0x9E),CARD3_BG));
-        row.add(statCard("₹","Total Revenue",revLbl,GREEN,"This Month",new Color(0x4C,0xAF,0x50),CARD4_BG));
+        row.add(statCard(statIcon(0,new Color(0xFF,0x98,0x00)),"Total Medicines",totalLbl,new Color(0xFF,0x98,0x00),"All medicines in stock",new Color(0x4C,0xAF,0x50),CARD1_BG));
+        row.add(statCard(statIcon(1,new Color(0xFF,0xB3,0x00)),"Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Within next 30 days",new Color(0xFF,0x98,0x00),CARD2_BG));
+        row.add(statCard(statIcon(2,new Color(0x7B,0x1F,0xA2)),"Low Stock",lowLbl,new Color(0x7B,0x1F,0xA2),"Stock below minimum",new Color(0x9E,0x9E,0x9E),CARD3_BG));
+        row.add(statCard(statIcon(3,GREEN),"Total Revenue",revLbl,GREEN,"This Month",new Color(0x4C,0xAF,0x50),CARD4_BG));
         return row;
     }
 
-    private JPanel statCard(String icon,String label,JLabel valLbl,Color ic,String sub,Color sc,Color bg) {
+    private JPanel statCard(Icon icon,String label,JLabel valLbl,Color ic,String sub,Color sc,Color bg) {
         JPanel c=new JPanel(){
             protected void paintComponent(Graphics g){
                 Graphics2D g2=(Graphics2D)g.create();
@@ -132,31 +155,38 @@ public class DashboardPanel extends JPanel {
             BorderFactory.createEmptyBorder(10,20,10,20)));
         search.addFocusListener(new FocusAdapter(){
             public void focusGained(FocusEvent e){if(search.getText().contains("Search")){search.setText("");search.setForeground(DARK);}}
-            public void focusLost(FocusEvent e){if(search.getText().isEmpty()){search.setText("  Search medicine by name, category or company...");search.setForeground(new Color(0xAA,0xAA,0xAA));sorter.setRowFilter(null);}}
+            public void focusLost(FocusEvent e){if(search.getText().isEmpty()){search.setText("  Search medicine by name, category or company...");search.setForeground(new Color(0xAA,0xAA,0xAA));refreshTable();}}
         });
         search.addKeyListener(new KeyAdapter(){
             public void keyReleased(KeyEvent e){
                 String t=search.getText().trim();
-                if(t.isEmpty()||t.contains("Search")){sorter.setRowFilter(null);}
-                else{sorter.setRowFilter(RowFilter.orFilter(java.util.Arrays.asList(
-                    RowFilter.regexFilter("(?i)"+java.util.regex.Pattern.quote(t),1),
-                    RowFilter.regexFilter("(?i)"+java.util.regex.Pattern.quote(t),2))));}
+                TableRowSorter<DefaultTableModel> sorter = (TableRowSorter<DefaultTableModel>) sharedTable.getRowSorter();
+                if(t.isEmpty()||t.contains("Search")){
+                    refreshTable();
+                }
+                else{
+                    sorter.setRowFilter(RowFilter.orFilter(java.util.Arrays.asList(
+                        RowFilter.regexFilter("(?i)"+java.util.regex.Pattern.quote(t),1),
+                        RowFilter.regexFilter("(?i)"+java.util.regex.Pattern.quote(t),2))));
+                }
             }
         });
         body.add(search,BorderLayout.NORTH);
-        styleTable();
-        JScrollPane sp=new JScrollPane(table); sp.setBorder(BorderFactory.createLineBorder(TBL_BRD));
+        JScrollPane sp=new JScrollPane(sharedTable); sp.setBorder(BorderFactory.createLineBorder(TBL_BRD));
         sp.getViewport().setBackground(WHITE);
         body.add(sp,BorderLayout.CENTER);
         pagPanel=new JPanel(new BorderLayout()); pagPanel.setOpaque(false);
         pagPanel.setBorder(BorderFactory.createEmptyBorder(8,0,0,0));
-        refreshPagination();
+        showingLabel = new JLabel();
+        showingLabel.setFont(F12); showingLabel.setForeground(GRAY);
+        pagPanel.add(showingLabel, BorderLayout.WEST);
+        refreshTable();
         body.add(pagPanel,BorderLayout.SOUTH);
         sec.add(body,BorderLayout.CENTER);
         return sec;
     }
 
-    private void styleTable() {
+    private void styleTable(JTable table) {
         table.setFont(F13); table.setRowHeight(40);
         table.setShowGrid(false); table.setIntercellSpacing(new Dimension(0,0));
         table.setSelectionBackground(new Color(252,228,236));
@@ -170,7 +200,7 @@ public class DashboardPanel extends JPanel {
                 JPanel ap=new JPanel(new FlowLayout(FlowLayout.CENTER,4,8));
                 ap.setOpaque(true);ap.setBackground(sel?new Color(252,228,236):(r%2==0?WHITE:ALT));
                 ap.add(iconLabel(0));ap.add(iconLabel(1));return ap;}});
-        table.getColumn("Action").setCellEditor(new ActionEditor(this));
+        table.getColumn("Action").setCellEditor(new ActionEditor(this, table));
         table.setDefaultEditor(Object.class,null);
         table.setDefaultRenderer(Object.class,new DefaultTableCellRenderer(){
             public Component getTableCellRendererComponent(JTable t,Object v,boolean sel,boolean foc,int r,int c){
@@ -245,13 +275,13 @@ public class DashboardPanel extends JPanel {
             try{Double.parseDouble(pr);}catch(Exception ex){
                 JOptionPane.showMessageDialog(dlg,"Price must be a valid number!","Error",JOptionPane.ERROR_MESSAGE);return;}
             int nextId=1006;
-            for(int i=0;i<medicineData.size();i++){
-                int id=Integer.parseInt(String.valueOf(medicineData.get(i)[0]));
+            for(int i=0;i<sharedTableModel.getRowCount();i++){
+                int id=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,0)));
                 if(id>=nextId)nextId=id+1;
             }
             Object[] newRow=new Object[]{String.valueOf(nextId),nm,(String)catF.getSelectedItem(),stk,pr,exp,status(stkVal),""};
-            medicineData.add(newRow);
-            currentPage=(int)Math.ceil(medicineData.size()/(double)RPP);
+            sharedTableModel.addRow(newRow);
+            currentPage=(int)Math.ceil(sharedTableModel.getRowCount()/(double)RPP);
             refreshTable();
             updateStats(); dlg.dispose();
             JOptionPane.showMessageDialog(this,"Medicine added successfully!","Success",JOptionPane.INFORMATION_MESSAGE);
@@ -274,7 +304,7 @@ public class DashboardPanel extends JPanel {
         return tf;
     }
 
-    void updateStats(){totalLbl.setText(String.valueOf(medicineData.size()));}
+    void updateStats(){totalLbl.setText(String.valueOf(sharedTableModel.getRowCount()));}
 
     private JPanel buildRightPanel() {
         JPanel r=new JPanel(); r.setLayout(new BoxLayout(r,BoxLayout.Y_AXIS));
@@ -343,10 +373,45 @@ public class DashboardPanel extends JPanel {
         JButton ab=pinkBtn("+ Add Medicine"); ab.addActionListener(e->showAddDialog());
         hdr.add(t,BorderLayout.WEST); hdr.add(ab,BorderLayout.EAST);
         p.add(hdr,BorderLayout.NORTH);
-        JScrollPane sp=new JScrollPane(table); sp.setBorder(BorderFactory.createLineBorder(BRD));
+        medicinesTable = new JTable(sharedTableModel);
+        styleTable(medicinesTable);
+        medicinesTable.setRowSorter(null);
+        JScrollPane sp=new JScrollPane(medicinesTable); sp.setBorder(BorderFactory.createLineBorder(BRD));
         sp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(sp);
         p.add(sp,BorderLayout.CENTER);
         return p;
+    }
+
+    private void applyTransparentScrollBar(JScrollPane sp) {
+        JScrollBar bar = sp.getVerticalScrollBar();
+        bar.setOpaque(false);
+        bar.setUnitIncrement(12);
+        bar.setUI(new BasicScrollBarUI() {
+            protected void configureScrollBarColors() {
+                thumbColor = new Color(0xC9,0x63,0x7A,90);
+                trackColor = new Color(0,0,0,0);
+            }
+            protected JButton createDecreaseButton(int orientation) { return zeroButton(); }
+            protected JButton createIncreaseButton(int orientation) { return zeroButton(); }
+            protected void paintTrack(Graphics g, JComponent c, Rectangle r) {}
+            protected void paintThumb(Graphics g, JComponent c, Rectangle r) {
+                if(!c.isEnabled() || r.width <= 0 || r.height <= 0) return;
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(thumbColor);
+                g2.fillRoundRect(r.x+3,r.y+3,r.width-6,r.height-6,8,8);
+                g2.dispose();
+            }
+        });
+    }
+
+    private JButton zeroButton() {
+        JButton b = new JButton();
+        b.setPreferredSize(new Dimension(0,0));
+        b.setMinimumSize(new Dimension(0,0));
+        b.setMaximumSize(new Dimension(0,0));
+        return b;
     }
 
     JPanel createStockAlertsPage() {
@@ -355,12 +420,11 @@ public class DashboardPanel extends JPanel {
         t.setIcon(sectionIcon(1)); t.setIconTextGap(6);
         t.setForeground(DARK); t.setAlignmentX(0f);
         p.add(t); p.add(Box.createVerticalStrut(16));
-        for(int i=0;i<medicineData.size();i++){
-            Object[] row=medicineData.get(i);
-            String st=String.valueOf(row[6]);
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            String st=String.valueOf(sharedTableModel.getValueAt(i, 6));
             if(!"In Stock".equals(st)){
-                String nm=(String)row[1];
-                int qty=Integer.parseInt(String.valueOf(row[3]));
+                String nm=(String)sharedTableModel.getValueAt(i, 1);
+                int qty=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i, 3)));
                 JPanel card=rndPanel(); card.setLayout(new BorderLayout(12,0));
                 card.setBorder(BorderFactory.createEmptyBorder(14,16,14,16));
                 card.setMaximumSize(new Dimension(Integer.MAX_VALUE,60)); card.setAlignmentX(0f);
@@ -399,15 +463,51 @@ public class DashboardPanel extends JPanel {
         return b;
     }
 
+    static Icon statIcon(int type,Color color){
+        return new Icon(){public int getIconWidth(){return 28;}public int getIconHeight(){return 28;}
+            public void paintIcon(Component c,Graphics g,int x,int y){
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setStroke(new BasicStroke(2f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+                g2.setColor(color);g2.translate(x,y);
+                if(type==0){
+                    Polygon top=new Polygon(new int[]{14,4,14,24},new int[]{3,8,13,8},4);
+                    Polygon left=new Polygon(new int[]{4,14,14,4},new int[]{8,13,25,20},4);
+                    Polygon right=new Polygon(new int[]{14,24,24,14},new int[]{13,8,20,25},4);
+                    g2.draw(top);g2.draw(left);g2.draw(right);
+                    g2.drawLine(14,13,14,25);g2.drawLine(8,10,18,5);
+                }else if(type==1){
+                    g2.drawRoundRect(8,3,12,22,3,3);
+                    g2.drawLine(7,3,21,3);g2.drawLine(7,25,21,25);
+                    g2.drawLine(9,8,19,8);g2.drawLine(9,20,19,20);
+                    g2.drawLine(10,8,18,20);g2.drawLine(18,8,10,20);
+                }else if(type==2){
+                    g2.drawLine(14,4,25,24);g2.drawLine(14,4,3,24);g2.drawLine(3,24,25,24);
+                    g2.drawLine(14,10,14,17);g2.fillOval(13,20,3,3);
+                }else{
+                    g2.setFont(new Font("SansSerif",Font.BOLD,26));
+                    g2.drawString("\u20B9",7,24);
+                }
+                g2.dispose();}};
+    }
+
     // Section title icons (16x16)
     static Icon sectionIcon(int type){
         return new Icon(){public int getIconWidth(){return 16;}public int getIconHeight(){return 16;}
             public void paintIcon(Component c,Graphics g,int x,int y){
                 Graphics2D g2=(Graphics2D)g.create();g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(PINK);g2.setStroke(new BasicStroke(1.5f));g2.translate(x,y);
-                if(type==0){g2.fillRoundRect(1,4,14,8,8,8);g2.setColor(WHITE);g2.drawLine(8,4,8,12);}
-                else if(type==1){g2.fillArc(2,1,12,10,0,180);g2.fillRect(2,6,12,5);g2.fillRect(0,11,16,2);g2.fillOval(6,13,4,3);}
-                else{g2.setStroke(new BasicStroke(2f));g2.drawPolyline(new int[]{8,5,11,8},new int[]{1,6,10,15},4);}
+                g2.setColor(PINK);g2.setStroke(new BasicStroke(1.6f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));g2.translate(x,y);
+                if(type==0){
+                    g2.rotate(-Math.PI/4,8,8);
+                    g2.drawRoundRect(2,5,12,6,6,6);g2.drawLine(8,5,8,11);
+                }
+                else if(type==1){
+                    g2.drawArc(4,2,8,8,0,180);g2.drawLine(4,6,4,11);g2.drawLine(12,6,12,11);
+                    g2.drawLine(2,11,14,11);g2.fillOval(7,13,2,2);
+                }
+                else{
+                    g2.drawLine(8,1,5,7);g2.drawLine(5,7,9,7);g2.drawLine(9,7,6,15);g2.drawLine(6,15,12,6);
+                }
                 g2.dispose();}};
     }
     // Action column icons
@@ -415,9 +515,15 @@ public class DashboardPanel extends JPanel {
         JLabel l=new JLabel(new Icon(){public int getIconWidth(){return 16;}public int getIconHeight(){return 16;}
             public void paintIcon(Component c,Graphics g,int x,int y){
                 Graphics2D g2=(Graphics2D)g.create();g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setStroke(new BasicStroke(1.5f));g2.translate(x,y);
-                if(type==0){g2.setColor(PINK);g2.drawLine(12,1,3,10);g2.drawLine(3,10,2,14);g2.drawLine(2,14,6,13);g2.drawLine(6,13,12,1);g2.fillRect(1,14,5,2);}
-                else{g2.setColor(new Color(0xE5,0x73,0x73));g2.drawLine(2,3,14,3);g2.drawRoundRect(4,3,8,12,2,2);g2.drawLine(6,6,6,12);g2.drawLine(8,6,8,12);g2.drawLine(10,6,10,12);g2.fillRect(5,1,6,2);}
+                g2.setStroke(new BasicStroke(1.5f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));g2.translate(x,y);
+                if(type==0){
+                    g2.setColor(PINK);g2.drawLine(11,2,14,5);g2.drawLine(14,5,6,13);
+                    g2.drawLine(6,13,2,14);g2.drawLine(2,14,3,10);g2.drawLine(3,10,11,2);
+                }
+                else{
+                    g2.setColor(new Color(0xE5,0x73,0x73));g2.drawLine(3,4,13,4);g2.drawRoundRect(5,4,6,10,2,2);
+                    g2.drawLine(6,7,6,12);g2.drawLine(8,7,8,12);g2.drawLine(10,7,10,12);g2.drawLine(6,2,10,2);g2.drawLine(7,2,7,4);g2.drawLine(9,2,9,4);
+                }
                 g2.dispose();}});
         l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));return l;
     }
@@ -431,6 +537,7 @@ public class DashboardPanel extends JPanel {
                 g2.dispose();super.paintComponent(g);}};
         b.setFont(F12);b.setForeground(PINK);b.setOpaque(false);b.setContentAreaFilled(false);
         b.setBorderPainted(false);b.setFocusPainted(false);
+        b.setMargin(new Insets(0,0,0,0));
         b.setPreferredSize(new Dimension(32,32));b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));return b;
     }
     // Graphics2D quick action icons (32x32, centered)
@@ -440,12 +547,12 @@ public class DashboardPanel extends JPanel {
             public void paintIcon(Component c,Graphics g,int x,int y){
                 Graphics2D g2=(Graphics2D)g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(PINK); g2.setStroke(new BasicStroke(2f)); g2.translate(x,y);
+                g2.setColor(PINK); g2.setStroke(new BasicStroke(2f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND)); g2.translate(x,y);
                 switch(type){
-                    case 0: g2.drawOval(2,2,28,28);g2.drawLine(16,8,16,24);g2.drawLine(8,16,24,16);break;
-                    case 1: g2.drawRoundRect(6,2,20,28,3,3);g2.drawLine(10,9,22,9);g2.drawLine(10,15,22,15);g2.drawLine(10,21,18,21);break;
-                    case 2: g2.drawPolyline(new int[]{2,7,9,27,25},new int[]{4,4,23,23,9},5);g2.fillOval(9,25,5,5);g2.fillOval(22,25,5,5);break;
-                    case 3: g2.fillRect(4,20,6,10);g2.fillRect(13,12,6,18);g2.fillRect(22,4,6,26);break;
+                    case 0: g2.drawRoundRect(9,10,14,14,3,3);g2.drawLine(16,6,16,24);g2.drawLine(9,16,23,16);g2.drawArc(12,5,8,8,0,180);break;
+                    case 1: g2.drawRoundRect(7,4,18,22,3,3);g2.drawLine(11,10,21,10);g2.drawLine(11,15,21,15);g2.drawLine(11,20,18,20);g2.fillRect(23,8,3,14);break;
+                    case 2: g2.drawPolyline(new int[]{4,8,10,25,23},new int[]{5,5,22,22,10},5);g2.drawLine(11,10,24,10);g2.fillOval(10,25,3,3);g2.fillOval(22,25,3,3);break;
+                    case 3: g2.fillRoundRect(5,20,5,9,2,2);g2.fillRoundRect(14,13,5,16,2,2);g2.fillRoundRect(23,6,5,23,2,2);break;
                 }
                 g2.dispose();
             }
@@ -498,57 +605,59 @@ public class DashboardPanel extends JPanel {
 
     void refreshPagination(){
         pagPanel.removeAll();
-        int total=medicineData.size(), totalPages=(int)Math.ceil(total/(double)RPP);
-        if(totalPages<1)totalPages=1;
-        if(currentPage>totalPages)currentPage=totalPages;
-        int start=(currentPage-1)*RPP+1, end=Math.min(currentPage*RPP,total);
-        JLabel info=new JLabel("Showing "+start+" to "+end+" of "+total+" entries");
-        info.setFont(F12);info.setForeground(GRAY);
-        JPanel pages=new JPanel(new FlowLayout(FlowLayout.RIGHT,4,0));pages.setOpaque(false);
-        JButton left=pageBtn("\u2190",false);left.setEnabled(currentPage>1);
-        left.addActionListener(e->{currentPage--;refreshTable();});
+        int totalRows = sharedTableModel.getRowCount();
+        int totalPages = (int)Math.ceil(totalRows / (double)RPP);
+        if(totalPages < 1) totalPages = 1;
+        if(currentPage > totalPages) currentPage = totalPages;
+
+        JPanel pages = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0)); pages.setOpaque(false);
+        JButton left = pageBtn("\u2190", false); left.setEnabled(currentPage > 1);
+        left.addActionListener(e -> { currentPage--; refreshTable(); });
         pages.add(left);
-        int tp=totalPages;
-        for(int i=1;i<=tp;i++){
-            if(tp>5&&i>3&&i<tp){if(i==4){JButton d=pageBtn("...",false);d.setEnabled(false);d.setForeground(GRAY);pages.add(d);}continue;}
-            int pg=i;boolean act=(pg==currentPage);
-            JButton pb=new JButton(String.valueOf(pg)){
+
+        for (int i = 1; i <= totalPages; i++) {
+            int pg = i;
+            boolean active = (pg == currentPage);
+            JButton btn = new JButton(String.valueOf(pg)){
                 protected void paintComponent(Graphics g){
                     Graphics2D g2=(Graphics2D)g.create();g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                    if(act){g2.setColor(PINK);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight(),8,8));}
+                    if(active){g2.setColor(PINK);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight(),8,8));}
                     else{g2.setColor(WHITE);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight(),8,8));
                         g2.setColor(PINK);g2.draw(new RoundRectangle2D.Float(0,0,getWidth()-1,getHeight()-1,8,8));}
                     g2.dispose();super.paintComponent(g);}};
-            pb.setFont(F12);pb.setForeground(act?WHITE:PINK);
-            pb.setOpaque(false);pb.setContentAreaFilled(false);pb.setBorderPainted(false);pb.setFocusPainted(false);
-            pb.setPreferredSize(new Dimension(32,32));pb.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            pb.addActionListener(e->{currentPage=pg;refreshTable();});
-            pages.add(pb);
+            btn.setFont(F12); btn.setForeground(active ? WHITE : PINK);
+            btn.setOpaque(false); btn.setContentAreaFilled(false); btn.setBorderPainted(false); btn.setFocusPainted(false);
+            btn.setMargin(new Insets(0,0,0,0));
+            btn.setPreferredSize(new Dimension(32, 32)); btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            btn.addActionListener(e -> { currentPage = pg; refreshTable(); });
+            pages.add(btn);
         }
-        JButton right=pageBtn("\u2192",false);right.setEnabled(currentPage<tp);
-        right.addActionListener(e->{currentPage++;refreshTable();});
+
+        JButton right = pageBtn("\u2192", false); right.setEnabled(currentPage < totalPages);
+        right.addActionListener(e -> { currentPage++; refreshTable(); });
         pages.add(right);
-        pagPanel.add(info,BorderLayout.WEST);pagPanel.add(pages,BorderLayout.EAST);
-        pagPanel.revalidate();pagPanel.repaint();
+
+        pagPanel.add(pages, BorderLayout.EAST);
+        if(showingLabel != null) pagPanel.add(showingLabel, BorderLayout.WEST);
+        pagPanel.revalidate(); pagPanel.repaint();
     }
 
     void showEditDialog(int dataIdx){
-        Object[] row=medicineData.get(dataIdx);
         JDialog dlg=new JDialog((Frame)SwingUtilities.getWindowAncestor(this),"Edit Medicine",true);
         dlg.setSize(500,400);dlg.setLocationRelativeTo(this);dlg.setResizable(false);
         JPanel p=new JPanel();p.setLayout(new BoxLayout(p,BoxLayout.Y_AXIS));
         p.setBorder(BorderFactory.createEmptyBorder(24,28,24,28));p.setBackground(WHITE);
         JLabel tl=new JLabel("Edit Medicine");tl.setFont(new Font("Segoe UI",Font.BOLD,20));tl.setForeground(DARK);tl.setAlignmentX(0f);
         p.add(tl);p.add(Box.createVerticalStrut(16));
-        JTextField nf=addField(p,"Medicine Name");nf.setText((String)row[1]);
+        JTextField nf=addField(p,"Medicine Name");nf.setText((String)sharedTableModel.getValueAt(dataIdx,1));
         JComboBox<String> cf=new JComboBox<>(new String[]{"Tablet","Capsule","Syrup","Injection"});
-        cf.setFont(F13);cf.setSelectedItem(row[2]);cf.setMaximumSize(new Dimension(Integer.MAX_VALUE,36));
+        cf.setFont(F13);cf.setSelectedItem(sharedTableModel.getValueAt(dataIdx,2));cf.setMaximumSize(new Dimension(Integer.MAX_VALUE,36));
         JPanel cp=new JPanel(new BorderLayout());cp.setOpaque(false);cp.setMaximumSize(new Dimension(Integer.MAX_VALUE,60));cp.setAlignmentX(0f);
         JLabel cl=new JLabel("Category");cl.setFont(FB13);cl.setForeground(DARK);
         cp.add(cl,BorderLayout.NORTH);cp.add(cf,BorderLayout.CENTER);p.add(cp);p.add(Box.createVerticalStrut(8));
-        JTextField sf=addField(p,"Stock");sf.setText(String.valueOf(row[3]));
-        JTextField pf=addField(p,"Price");pf.setText(String.valueOf(row[4]));
-        JTextField ef=addField(p,"Expiry Date");ef.setText(String.valueOf(row[5]));
+        JTextField sf=addField(p,"Stock");sf.setText(String.valueOf(sharedTableModel.getValueAt(dataIdx,3)));
+        JTextField pf=addField(p,"Price");pf.setText(String.valueOf(sharedTableModel.getValueAt(dataIdx,4)));
+        JTextField ef=addField(p,"Expiry Date");ef.setText(String.valueOf(sharedTableModel.getValueAt(dataIdx,5)));
         p.add(Box.createVerticalStrut(12));
         JPanel btns=new JPanel(new FlowLayout(FlowLayout.RIGHT,10,0));btns.setOpaque(false);btns.setAlignmentX(0f);btns.setMaximumSize(new Dimension(Integer.MAX_VALUE,40));
         JButton cancel=new JButton("Cancel");cancel.setFont(FB13);cancel.setForeground(GRAY);cancel.setPreferredSize(new Dimension(100,36));
@@ -558,7 +667,12 @@ public class DashboardPanel extends JPanel {
             String nm=nf.getText().trim(),stk=sf.getText().trim(),pr=pf.getText().trim(),exp=ef.getText().trim();
             if(nm.isEmpty()||stk.isEmpty()||pr.isEmpty()||exp.isEmpty()){JOptionPane.showMessageDialog(dlg,"Fill all fields!");return;}
             int sv;try{sv=Integer.parseInt(stk);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Stock must be number!");return;}
-            row[1]=nm;row[2]=(String)cf.getSelectedItem();row[3]=stk;row[4]=pr;row[5]=exp;row[6]=status(sv);
+            sharedTableModel.setValueAt(nm, dataIdx, 1);
+            sharedTableModel.setValueAt(cf.getSelectedItem(), dataIdx, 2);
+            sharedTableModel.setValueAt(stk, dataIdx, 3);
+            sharedTableModel.setValueAt(pr, dataIdx, 4);
+            sharedTableModel.setValueAt(exp, dataIdx, 5);
+            sharedTableModel.setValueAt(status(sv), dataIdx, 6);
             refreshTable();dlg.dispose();JOptionPane.showMessageDialog(this,"Medicine updated!");
         });
         btns.add(cancel);btns.add(save);p.add(btns);
@@ -567,20 +681,20 @@ public class DashboardPanel extends JPanel {
 
     // Action column cell editor
     static class ActionEditor extends AbstractCellEditor implements TableCellEditor{
-        JPanel panel;DashboardPanel dp;int row;
-        ActionEditor(DashboardPanel dp){this.dp=dp;
+        JPanel panel;DashboardPanel dp;JTable table;int row;
+        ActionEditor(DashboardPanel dp,JTable table){this.dp=dp;this.table=table;
             panel=new JPanel(new FlowLayout(FlowLayout.CENTER,4,8));panel.setOpaque(true);
             JButton edit=new JButton(iconLabel(0).getIcon());
             edit.setBorder(null);edit.setContentAreaFilled(false);edit.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             edit.setPreferredSize(new Dimension(16,16));
-            edit.addActionListener(e->{fireEditingStopped();int di=(dp.currentPage-1)*RPP+row;if(di<medicineData.size())dp.showEditDialog(di);});
+            edit.addActionListener(e->{fireEditingStopped();int di=table.convertRowIndexToModel(row);if(di<sharedTableModel.getRowCount())dp.showEditDialog(di);});
             JButton del=new JButton(iconLabel(1).getIcon());
             del.setBorder(null);del.setContentAreaFilled(false);del.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             del.setPreferredSize(new Dimension(16,16));
-            del.addActionListener(e->{fireEditingStopped();int di=(dp.currentPage-1)*RPP+row;if(di<medicineData.size()){
-                String nm=(String)medicineData.get(di)[1];
+            del.addActionListener(e->{fireEditingStopped();int di=table.convertRowIndexToModel(row);if(di<sharedTableModel.getRowCount()){
+                String nm=(String)sharedTableModel.getValueAt(di,1);
                 if(JOptionPane.showConfirmDialog(dp,"Delete "+nm+"?","Delete",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION){
-                    medicineData.remove(di);dp.refreshTable();dp.updateStats();}}});
+                    sharedTableModel.removeRow(di);dp.refreshTable();dp.updateStats();}}});
             panel.add(edit);panel.add(del);}
         public Component getTableCellEditorComponent(JTable t,Object v,boolean sel,int r,int c){
             row=r;panel.setBackground(sel?new Color(252,228,236):WHITE);return panel;}
