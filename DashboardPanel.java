@@ -32,6 +32,7 @@ public class DashboardPanel extends JPanel {
     private JLabel showingLabel;
     private JLabel totalLbl,expLbl,lowLbl,revLbl;
     private JPanel pagPanel;
+    private java.util.function.IntConsumer navigator;
     static final int RPP=5;
     private String[] cols={"ID","Medicine Name","Category","Stock","Price (\u20b9)","Expiry Date","Status","Action"};
 
@@ -66,6 +67,14 @@ public class DashboardPanel extends JPanel {
         mid.add(buildRightPanel(),BorderLayout.EAST);
         top.add(mid,BorderLayout.CENTER);
         add(top,BorderLayout.CENTER);
+    }
+
+    void setNavigator(java.util.function.IntConsumer navigator) {
+        this.navigator = navigator;
+    }
+
+    private void navigateTo(int index) {
+        if(navigator != null) navigator.accept(index);
     }
 
     private void initModel() {
@@ -318,6 +327,7 @@ public class DashboardPanel extends JPanel {
         at.setIcon(sectionIcon(1)); at.setIconTextGap(6);
         JLabel va=new JLabel("View All"); va.setFont(F12); va.setForeground(PINK);
         va.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        va.addMouseListener(new MouseAdapter(){public void mouseClicked(MouseEvent e){navigateTo(4);}});
         ah.add(at,BorderLayout.WEST); ah.add(va,BorderLayout.EAST);
         alerts.add(ah); alerts.add(Box.createVerticalStrut(12));
         alerts.add(alertItem("Dolo 650",28));alerts.add(Box.createVerticalStrut(8));
@@ -332,8 +342,16 @@ public class DashboardPanel extends JPanel {
         qa.add(qt); qa.add(Box.createVerticalStrut(12));
         JPanel grid=new JPanel(new GridLayout(2,2,8,8)); grid.setOpaque(false);
         grid.setAlignmentX(0f); grid.setMaximumSize(new Dimension(240,160));
-        grid.add(actionBtn(0,"Add Medicine")); grid.add(actionBtn(1,"New Bill"));
-        grid.add(actionBtn(2,"Purchase")); grid.add(actionBtn(3,"View Reports"));
+        JButton addMedicine=actionBtn(0,"Add Medicine");
+        addMedicine.addActionListener(e->showAddDialog());
+        JButton newBill=actionBtn(1,"New Bill");
+        newBill.addActionListener(e->navigateTo(2));
+        JButton purchase=actionBtn(2,"Purchase");
+        purchase.addActionListener(e->navigateTo(3));
+        JButton reports=actionBtn(3,"View Reports");
+        reports.addActionListener(e->navigateTo(5));
+        grid.add(addMedicine); grid.add(newBill);
+        grid.add(purchase); grid.add(reports);
         qa.add(grid); r.add(qa); r.add(Box.createVerticalGlue());
         return r;
     }
@@ -445,6 +463,360 @@ public class DashboardPanel extends JPanel {
         }
         p.add(Box.createVerticalGlue());
         return p;
+    }
+
+    JPanel createBillingPage() {
+        JPanel p=new JPanel(new BorderLayout(14,14)); p.setOpaque(false);
+        JPanel main=new JPanel(new BorderLayout(0,12)); main.setOpaque(false);
+        JLabel t=new JLabel(" Billing"); t.setFont(FB16); t.setForeground(DARK);
+        t.setIcon(qaIcon(1)); t.setIconTextGap(8);
+        main.add(t,BorderLayout.NORTH);
+
+        JPanel form=rndPanel(); form.setLayout(new GridLayout(2,4,10,10));
+        form.setBorder(BorderFactory.createEmptyBorder(16,16,16,16));
+        JComboBox<String> medBox=new JComboBox<>(medicineNames()); medBox.setFont(F13);
+        JTextField qtyField=input("1"), discountField=input("0");
+        JTextField customerField=input("Walk-in"), mobileField=input(""), paymentField=input("Cash");
+        form.add(labeled("Medicine",medBox));
+        form.add(labeled("Qty",qtyField));
+        form.add(labeled("Discount %",discountField));
+        JButton add=pinkBtn("+ Add Item"); form.add(add);
+        form.add(labeled("Customer",customerField));
+        form.add(labeled("Mobile",mobileField));
+        form.add(labeled("Payment",paymentField));
+        JButton print=pinkBtn("Generate Bill"); form.add(print);
+        main.add(form,BorderLayout.CENTER);
+
+        String[] cols={"Item","Qty","Price","Amount"};
+        Object[][] rows={{"Dolo 650",2,"35.00","70.00"},
+                         {"Paracetamol",1,"20.00","20.00"},
+                         {"Cetrizine 10mg",2,"18.00","36.00"},
+                         {"Omeprazole 20mg",1,"45.00","45.00"}};
+        JTable billTable=simpleTable(cols,rows);
+        DefaultTableModel billModel=(DefaultTableModel)billTable.getModel();
+        JScrollPane sp=new JScrollPane(billTable); sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
+        main.add(sp,BorderLayout.SOUTH);
+
+        JPanel side=new JPanel(); side.setOpaque(false); side.setLayout(new BoxLayout(side,BoxLayout.Y_AXIS));
+        side.setPreferredSize(new Dimension(260,0));
+        JLabel subtotalValue=new JLabel("₹0.00"), taxValue=new JLabel("₹0.00"), totalValue=new JLabel("₹0.00");
+        side.add(totalCard("Subtotal",subtotalValue,sectionIcon(0),new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00)));
+        side.add(Box.createVerticalStrut(12));
+        side.add(totalCard("Tax",taxValue,sectionIcon(2),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
+        side.add(Box.createVerticalStrut(12));
+        side.add(totalCard("Total",totalValue,statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
+        p.add(main,BorderLayout.CENTER); p.add(side,BorderLayout.EAST);
+
+        Runnable updateTotals=()->{
+            double subtotal=0;
+            for(int i=0;i<billModel.getRowCount();i++) subtotal+=Double.parseDouble(String.valueOf(billModel.getValueAt(i,3)));
+            double discount=0;
+            try{discount=Double.parseDouble(discountField.getText().trim());}catch(Exception ex){}
+            subtotal=subtotal-(subtotal*discount/100.0);
+            double tax=subtotal*0.05,total=subtotal+tax;
+            subtotalValue.setText("₹"+String.format("%.2f",subtotal));
+            taxValue.setText("₹"+String.format("%.2f",tax));
+            totalValue.setText("₹"+String.format("%.2f",total));
+        };
+        add.addActionListener(e->{
+            int qty;
+            try{qty=Integer.parseInt(qtyField.getText().trim()); if(qty<=0)throw new NumberFormatException();}catch(Exception ex){
+                JOptionPane.showMessageDialog(this,"Enter a valid quantity.","Billing",JOptionPane.ERROR_MESSAGE);return;}
+            int idx=medBox.getSelectedIndex();
+            String name=String.valueOf(sharedTableModel.getValueAt(idx,1));
+            double price=Double.parseDouble(String.valueOf(sharedTableModel.getValueAt(idx,4)));
+            billModel.addRow(new Object[]{name,qty,String.format("%.2f",price),String.format("%.2f",qty*price)});
+            updateTotals.run();
+        });
+        print.addActionListener(e->{
+            if(billModel.getRowCount()==0){JOptionPane.showMessageDialog(this,"Add at least one item before generating a bill.","Billing",JOptionPane.WARNING_MESSAGE);return;}
+            JOptionPane.showMessageDialog(this,
+                "Bill generated for "+customerField.getText().trim()+"\nMobile: "+mobileField.getText().trim()+
+                "\nPayment: "+paymentField.getText().trim()+"\nTotal: "+totalValue.getText(),
+                "Bill Generated",JOptionPane.INFORMATION_MESSAGE);
+        });
+        updateTotals.run();
+        return p;
+    }
+
+    JPanel createPurchasesPage() {
+        JPanel p=new JPanel(new BorderLayout(0,12)); p.setOpaque(false);
+        JPanel hdr=new JPanel(new BorderLayout()); hdr.setOpaque(false);
+        JLabel t=new JLabel(" Purchases"); t.setFont(FB16); t.setForeground(DARK);
+        t.setIcon(qaIcon(2)); t.setIconTextGap(8);
+        JButton order=pinkBtn("+ New Purchase"); hdr.add(t,BorderLayout.WEST); hdr.add(order,BorderLayout.EAST);
+        p.add(hdr,BorderLayout.NORTH);
+
+        JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
+        cards.add(coloredSummaryCard("Pending Orders","4",sectionIcon(2),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
+        cards.add(coloredSummaryCard("This Month","₹18,900",statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
+        cards.add(coloredSummaryCard("Suppliers","6",qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+        p.add(cards,BorderLayout.CENTER);
+
+        String[] cols={"PO No","Supplier","Items","Amount","Status"};
+        Object[][] rows={{"PO-1024","MediLife Distributors","Dolo 650, Paracetamol","₹4,850","Received"},
+                         {"PO-1025","CareWell Pharma","Amoxicillin 500mg","₹3,600","Pending"},
+                         {"PO-1026","HealthPlus Supply","Omeprazole 20mg","₹2,250","Pending"},
+                         {"PO-1027","Prime Medicals","Metformin 500mg","₹8,200","Received"}};
+        JTable tbl=simpleTable(cols,rows);
+        DefaultTableModel purchaseModel=(DefaultTableModel)tbl.getModel();
+        order.addActionListener(e->{
+            String supplier=JOptionPane.showInputDialog(this,"Supplier name:","New Purchase",JOptionPane.PLAIN_MESSAGE);
+            if(supplier==null||supplier.trim().isEmpty())return;
+            String items=JOptionPane.showInputDialog(this,"Items:","New Purchase",JOptionPane.PLAIN_MESSAGE);
+            if(items==null||items.trim().isEmpty())return;
+            String amount=JOptionPane.showInputDialog(this,"Amount:","New Purchase",JOptionPane.PLAIN_MESSAGE);
+            if(amount==null||amount.trim().isEmpty())return;
+            purchaseModel.addRow(new Object[]{"PO-"+(1024+purchaseModel.getRowCount()+1),supplier.trim(),items.trim(),"₹"+amount.trim(),"Pending"});
+        });
+        JScrollPane sp=new JScrollPane(tbl); sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
+        p.add(sp,BorderLayout.SOUTH);
+        return p;
+    }
+
+    JPanel createReportsPage() {
+        JPanel p=new JPanel(new BorderLayout(0,12)); p.setOpaque(false);
+        JLabel t=new JLabel(" Reports"); t.setFont(FB16); t.setForeground(DARK);
+        t.setIcon(qaIcon(3)); t.setIconTextGap(8);
+        p.add(t,BorderLayout.NORTH);
+
+        JPanel cards=new JPanel(new GridLayout(1,4,12,0)); cards.setOpaque(false);
+        cards.add(coloredSummaryCard("Inventory Value","₹433.00",statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
+        cards.add(coloredSummaryCard("Low Stock","3",sectionIcon(1),new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00)));
+        cards.add(coloredSummaryCard("Critical","2",sectionIcon(2),new Color(0xFF,0xEB,0xEE),RED));
+        cards.add(coloredSummaryCard("Categories","2",sectionIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+
+        String[] cols={"Medicine","Stock","Value","Status"};
+        Object[][] rows=new Object[sharedTableModel.getRowCount()][4];
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            int stock=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,3)));
+            double price=Double.parseDouble(String.valueOf(sharedTableModel.getValueAt(i,4)));
+            rows[i][0]=sharedTableModel.getValueAt(i,1);
+            rows[i][1]=stock;
+            rows[i][2]="₹"+String.format("%.2f",stock*price);
+            rows[i][3]=sharedTableModel.getValueAt(i,6);
+        }
+        JPanel center=new JPanel(); center.setOpaque(false);
+        center.setLayout(new BoxLayout(center,BoxLayout.Y_AXIS));
+        cards.setMaximumSize(new Dimension(Integer.MAX_VALUE,92));
+        center.add(cards);
+        center.add(Box.createVerticalStrut(12));
+        center.add(reportInsights());
+        p.add(center,BorderLayout.CENTER);
+        JTable tbl=simpleTable(cols,rows);
+        JScrollPane sp=new JScrollPane(tbl); sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
+        p.add(sp,BorderLayout.SOUTH);
+        return p;
+    }
+
+    JPanel createSettingsPage() {
+        JPanel p=new JPanel(new BorderLayout(0,14)); p.setOpaque(false);
+        JLabel t=new JLabel(" Settings"); t.setFont(FB16); t.setForeground(DARK);
+        t.setIcon(sectionIcon(2)); t.setIconTextGap(8);
+        p.add(t,BorderLayout.NORTH);
+
+        JPanel grid=new JPanel(new GridLayout(2,2,14,14)); grid.setOpaque(false);
+        grid.add(settingsCard("Pharmacy Profile",new JComponent[]{
+            inputRow("Pharmacy Name","PHARMACY INVENTORY SYSTEM"),
+            inputRow("Owner","Admin"),
+            inputRow("Contact","98765 43210")
+        }));
+        grid.add(settingsCard("Billing Preferences",new JComponent[]{
+            inputRow("Default Tax","5%"),
+            inputRow("Payment Mode","Cash / UPI"),
+            checkRow("Auto print bill",true)
+        }));
+        grid.add(settingsCard("Stock Rules",new JComponent[]{
+            inputRow("Low stock limit","10"),
+            inputRow("Critical limit","5"),
+            checkRow("Show expiry alerts",true)
+        }));
+        grid.add(settingsCard("Notifications",new JComponent[]{
+            checkRow("Daily stock summary",true),
+            checkRow("Purchase reminders",false),
+            checkRow("Low stock popup",true)
+        }));
+        p.add(grid,BorderLayout.CENTER);
+
+        JPanel bottom=new JPanel(new FlowLayout(FlowLayout.RIGHT,10,0)); bottom.setOpaque(false);
+        JButton reset=new JButton("Reset");
+        reset.setFont(FB13);reset.setForeground(GRAY);reset.setBackground(WHITE);
+        reset.setBorder(BorderFactory.createLineBorder(BRD,1,true));
+        reset.setPreferredSize(new Dimension(100,34));
+        JButton save=pinkBtn("Save Settings"); save.setPreferredSize(new Dimension(140,34));
+        save.addActionListener(e->JOptionPane.showMessageDialog(this,"Settings saved successfully.","Settings",JOptionPane.INFORMATION_MESSAGE));
+        bottom.add(reset); bottom.add(save);
+        p.add(bottom,BorderLayout.SOUTH);
+        return p;
+    }
+
+    private JPanel settingsCard(String title,JComponent[] rows) {
+        JPanel card=rndPanel(); card.setLayout(new BoxLayout(card,BoxLayout.Y_AXIS));
+        card.setBorder(BorderFactory.createEmptyBorder(18,18,18,18));
+        JLabel h=new JLabel(title); h.setFont(FB16); h.setForeground(PINK); h.setAlignmentX(0f);
+        card.add(h); card.add(Box.createVerticalStrut(12));
+        for(JComponent row:rows){row.setAlignmentX(0f);card.add(row);card.add(Box.createVerticalStrut(10));}
+        return card;
+    }
+
+    private JPanel inputRow(String label,String value) {
+        JPanel row=new JPanel(new BorderLayout(8,0)); row.setOpaque(false);
+        JLabel l=new JLabel(label); l.setFont(F12); l.setForeground(GRAY); l.setPreferredSize(new Dimension(110,30));
+        JTextField f=input(value); f.setPreferredSize(new Dimension(0,30));
+        row.add(l,BorderLayout.WEST); row.add(f,BorderLayout.CENTER);
+        return row;
+    }
+
+    private JPanel checkRow(String label,boolean selected) {
+        JPanel row=new JPanel(new BorderLayout()); row.setOpaque(false);
+        JCheckBox cb=new JCheckBox(label,selected); cb.setFont(F13); cb.setForeground(DARK);
+        cb.setOpaque(false); cb.setFocusPainted(false); cb.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        row.add(cb,BorderLayout.WEST);
+        return row;
+    }
+
+    private JPanel simpleField(String label,String value) {
+        JPanel p=new JPanel(new BorderLayout(0,4)); p.setOpaque(false);
+        JLabel l=new JLabel(label); l.setFont(FB12); l.setForeground(DARK);
+        JTextField f=new JTextField(value); f.setFont(F13);
+        f.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(BRD,1,true),BorderFactory.createEmptyBorder(4,8,4,8)));
+        p.add(l,BorderLayout.NORTH); p.add(f,BorderLayout.CENTER);
+        return p;
+    }
+
+    private JPanel comboField(String label,String[] values) {
+        JPanel p=new JPanel(new BorderLayout(0,4)); p.setOpaque(false);
+        JLabel l=new JLabel(label); l.setFont(FB12); l.setForeground(DARK);
+        JComboBox<String> cb=new JComboBox<>(values); cb.setFont(F13);
+        p.add(l,BorderLayout.NORTH); p.add(cb,BorderLayout.CENTER);
+        return p;
+    }
+
+    private JTextField input(String value) {
+        JTextField f=new JTextField(value); f.setFont(F13);
+        f.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(BRD,1,true),BorderFactory.createEmptyBorder(4,8,4,8)));
+        return f;
+    }
+
+    private JPanel labeled(String label,JComponent field) {
+        JPanel p=new JPanel(new BorderLayout(0,4)); p.setOpaque(false);
+        JLabel l=new JLabel(label); l.setFont(FB12); l.setForeground(DARK);
+        p.add(l,BorderLayout.NORTH); p.add(field,BorderLayout.CENTER);
+        return p;
+    }
+
+    private String[] medicineNames() {
+        String[] names=new String[sharedTableModel.getRowCount()];
+        for(int i=0;i<names.length;i++) names[i]=String.valueOf(sharedTableModel.getValueAt(i,1));
+        return names;
+    }
+
+    private JTable simpleTable(String[] columns,Object[][] rows) {
+        JTable t=new JTable(new DefaultTableModel(rows,columns){public boolean isCellEditable(int r,int c){return false;}});
+        t.setFont(F13); t.setRowHeight(38); t.setShowGrid(false); t.setIntercellSpacing(new Dimension(0,0));
+        t.setSelectionBackground(new Color(252,228,236)); t.setSelectionForeground(new Color(180,60,90));
+        t.setDefaultRenderer(Object.class,new DefaultTableCellRenderer(){
+            public Component getTableCellRendererComponent(JTable table,Object v,boolean sel,boolean foc,int r,int c){
+                JLabel l=(JLabel)super.getTableCellRendererComponent(table,v,sel,foc,r,c);
+                if(!sel)l.setBackground(r%2==0?WHITE:ALT);
+                l.setForeground(DARK); l.setOpaque(true); l.setBorder(BorderFactory.createEmptyBorder(0,8,0,8));
+                return l;
+            }
+        });
+        JTableHeader h=t.getTableHeader(); h.setFont(FB13); h.setBackground(TBL_HDR_BG); h.setForeground(TBL_HDR_FG);
+        h.setPreferredSize(new Dimension(0,38)); h.setReorderingAllowed(false);
+        return t;
+    }
+
+    private JPanel summaryCard(String label,String value,Icon icon) {
+        JPanel c=rndPanel(); c.setLayout(new BorderLayout(10,0));
+        c.setBorder(BorderFactory.createEmptyBorder(16,16,16,16));
+        JLabel ic=new JLabel(icon); c.add(ic,BorderLayout.WEST);
+        JPanel tx=new JPanel(); tx.setLayout(new BoxLayout(tx,BoxLayout.Y_AXIS)); tx.setOpaque(false);
+        JLabel v=new JLabel(value); v.setFont(FB16); v.setForeground(DARK);
+        JLabel l=new JLabel(label); l.setFont(F12); l.setForeground(GRAY);
+        tx.add(v); tx.add(Box.createVerticalStrut(3)); tx.add(l);
+        c.add(tx,BorderLayout.CENTER);
+        return c;
+    }
+
+    private JPanel coloredSummaryCard(String label,String value,Icon icon,Color bg,Color fg) {
+        JLabel v=new JLabel(value);
+        return totalCard(label,v,icon,bg,fg);
+    }
+
+    private JPanel reportInsights() {
+        int tablet=0,capsule=0,inStock=0,low=0,critical=0,totalStock=0;
+        String lowestName="",highestName="";
+        int lowest=Integer.MAX_VALUE,highest=0;
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            int stock=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,3)));
+            String cat=String.valueOf(sharedTableModel.getValueAt(i,2));
+            String st=String.valueOf(sharedTableModel.getValueAt(i,6));
+            String name=String.valueOf(sharedTableModel.getValueAt(i,1));
+            if("Capsule".equals(cat)) capsule+=stock; else tablet+=stock;
+            if("In Stock".equals(st)) inStock++; else if("Low Stock".equals(st)) low++; else critical++;
+            totalStock+=stock;
+            if(stock<lowest){lowest=stock;lowestName=name;}
+            if(stock>highest){highest=stock;highestName=name;}
+        }
+        JPanel wrap=new JPanel(new GridLayout(1,3,12,0)); wrap.setOpaque(false);
+        wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE,150));
+        wrap.add(insightPanel("Stock Health",
+            new String[]{"In Stock: "+inStock,"Low Stock: "+low,"Critical: "+critical},
+            new Color(0xE8,0xF5,0xE9),GREEN));
+        wrap.add(insightPanel("Category Split",
+            new String[]{"Tablet units: "+tablet,"Capsule units: "+capsule,"Total units: "+totalStock},
+            new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00)));
+        wrap.add(insightPanel("Attention",
+            new String[]{"Lowest: "+lowestName+" ("+lowest+")","Highest: "+highestName+" ("+highest+")","Review critical stock first"},
+            new Color(0xFF,0xF0,0xF5),PINK));
+        return wrap;
+    }
+
+    private JPanel insightPanel(String title,String[] lines,Color bg,Color accent) {
+        JPanel p=new JPanel(){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(bg);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight()-2,14,14));
+                g2.setColor(BRD);g2.draw(new RoundRectangle2D.Float(0,0,getWidth()-1,getHeight()-3,14,14));
+                g2.dispose();
+            }
+        };
+        p.setOpaque(false);p.setLayout(new BoxLayout(p,BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createEmptyBorder(16,18,16,18));
+        JLabel h=new JLabel(title);h.setFont(FB13);h.setForeground(accent);h.setAlignmentX(0f);
+        p.add(h);p.add(Box.createVerticalStrut(10));
+        for(String line:lines){
+            JLabel l=new JLabel(line);l.setFont(F12);l.setForeground(DARK);l.setAlignmentX(0f);
+            p.add(l);p.add(Box.createVerticalStrut(6));
+        }
+        return p;
+    }
+
+    private JPanel totalCard(String label,JLabel value,Icon icon,Color bg,Color fg) {
+        JPanel c=new JPanel(){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(bg);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight()-2,14,14));
+                g2.setColor(BRD);g2.draw(new RoundRectangle2D.Float(0,0,getWidth()-1,getHeight()-3,14,14));
+                g2.dispose();
+            }
+        };
+        c.setOpaque(false); c.setLayout(new BorderLayout(10,0));
+        c.setBorder(BorderFactory.createEmptyBorder(18,16,18,16));
+        JLabel ic=new JLabel(icon); c.add(ic,BorderLayout.WEST);
+        JPanel tx=new JPanel(); tx.setLayout(new BoxLayout(tx,BoxLayout.Y_AXIS)); tx.setOpaque(false);
+        value.setFont(FB28); value.setForeground(fg);
+        JLabel l=new JLabel(label); l.setFont(F12); l.setForeground(GRAY);
+        tx.add(value); tx.add(Box.createVerticalStrut(3)); tx.add(l);
+        c.add(tx,BorderLayout.CENTER);
+        return c;
     }
 
     private JButton pinkBtn(String text) {

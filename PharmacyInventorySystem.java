@@ -48,6 +48,7 @@ public class PharmacyInventorySystem extends JFrame {
         contentPanel.setBackground(WHITE);
         contentPanel.setBorder(BorderFactory.createEmptyBorder(20,24,0,24));
         dashPanel=new DashboardPanel();
+        dashPanel.setNavigator(this::selectNav);
         contentPanel.add(dashPanel);
         center.add(contentPanel,BorderLayout.CENTER);
         JLabel footer=new JLabel("  Pharmacy Inventory System | All rights reserved \u00A9 2025",SwingConstants.CENTER);
@@ -198,7 +199,11 @@ public class PharmacyInventorySystem extends JFrame {
         switch(idx){
             case 0: contentPanel.add(dashPanel); break;
             case 1: contentPanel.add(dashPanel.createMedicinesPage()); break;
+            case 2: contentPanel.add(dashPanel.createBillingPage()); break;
+            case 3: contentPanel.add(dashPanel.createPurchasesPage()); break;
             case 4: contentPanel.add(dashPanel.createStockAlertsPage()); break;
+            case 5: contentPanel.add(dashPanel.createReportsPage()); break;
+            case 7: contentPanel.add(dashPanel.createSettingsPage()); break;
             default: contentPanel.add(createPlaceholder(navLabels[idx],idx)); break;
         }
         contentPanel.revalidate(); contentPanel.repaint();
