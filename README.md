@@ -1,21 +1,28 @@
-# Pharmacy Inventory System
+# 💊 Pharmacy Inventory System
 
-A premium Java Swing desktop application for managing pharmacy inventory.
+A premium, high-performance Java Swing desktop application designed to streamline pharmacy management with a beautiful, modern aesthetic. ✨
 
-## Features
-- **Interactive Dashboard**: Real-time stats for total medicines, expiring items, and low stock.
-- **Medicine Management**: Add, delete, and view medicines with auto-status detection.
-- **Live Search**: Instant filtering of inventory by name or category.
-- **Stock Alerts**: Dedicated panel for items requiring immediate attention.
-- **Modern UI**: Pink-themed design with rounded components, hover effects, and a live clock.
+---
 
-## Screenshots
+## ✨ Features
+- **📊 Interactive Dashboard**: Visualized real-time statistics for total medicines, expiring items, and low stock levels.
+- **💊 Medicine Management**: Seamlessly add, delete, and manage inventory with intelligent auto-status detection.
+- **🔍 Live Smart Search**: Instant, case-insensitive filtering by medicine name or category as you type.
+- **⚠️ Critical Stock Alerts**: Dedicated real-time monitoring for items requiring urgent restock.
+- **🎨 Premium UI/UX**: Soft pink-themed glassmorphism aesthetic with rounded components, smooth hover effects, and a live digital clock.
+- **⚡ Quick Actions**: One-click access to common tasks like adding medicines or generating reports.
+
+---
+
+## 📸 Screenshots
 ![Dashboard Preview](screenshot.png) 
-*(Note: Replace this with your own screenshot after running the app!)*
+*(Note: Replace this with your own screenshot to show off your beautiful UI!)*
 
-## How to Run
-1. **Prerequisites**: Ensure you have [JDK 11](https://learn.microsoft.com/en-us/java/openjdk/download) or higher installed.
-2. **Clone**: Clone this repository to your local machine.
+---
+
+## 🚀 How to Run
+1. **Prerequisites**: Ensure you have [JDK 11](https://learn.microsoft.com/en-us/java/openjdk/download) or higher installed. ☕
+2. **Clone**: Clone this repository to your local machine. 📂
 3. **Compile**: Open a terminal in the project folder and run:
    ```bash
    javac -encoding UTF-8 *.java
@@ -24,9 +31,14 @@ A premium Java Swing desktop application for managing pharmacy inventory.
    ```bash
    java -Dfile.encoding=UTF-8 PharmacyInventorySystem
    ```
-   *Note: The `-Dfile.encoding=UTF-8` flag ensures emojis and special characters render correctly.*
+   *💡 Note: The `-Dfile.encoding=UTF-8` flag ensures all emojis and special characters render perfectly on all systems.*
 
+---
 
-## Tech Stack
-- Java Standard Edition (JDK 11+)
-- Java Swing & AWT (No external libraries)
+## 🛠️ Tech Stack
+- **Core**: Java Standard Edition (JDK 11+) ☕
+- **GUI**: Java Swing & AWT (Zero external dependencies) 🖥️
+- **Styling**: Custom Custom UI components with anti-aliased rendering 🎨
+
+---
+Created with ❤️ by jayshree
