@@ -26,7 +26,8 @@ public class PharmacyInventorySystem extends JFrame {
         System.setProperty("swing.aatext","true");
         SwingUtilities.invokeLater(()->{
             try{UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());}catch(Exception e){}
-            new PharmacyInventorySystem();
+            DatabaseManager.initializeDB();
+            new LoginFrame(PharmacyInventorySystem::new);
         });
     }
 

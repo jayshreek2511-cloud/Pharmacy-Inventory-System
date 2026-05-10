@@ -2,9 +2,17 @@ import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.table.*;
 import javax.swing.plaf.basic.BasicScrollBarUI;
+import javax.print.*;
+import javax.print.attribute.*;
+import javax.print.attribute.standard.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.*;
+import java.awt.print.*;
+import java.io.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Vector;
 
 public class DashboardPanel extends JPanel {
     private static final Color PINK=new Color(0xC9,0x63,0x7A),WHITE=Color.WHITE;
@@ -32,6 +40,7 @@ public class DashboardPanel extends JPanel {
     private JLabel showingLabel;
     private JLabel totalLbl,expLbl,lowLbl,revLbl;
     private JPanel pagPanel;
+    private StockOverviewPanel stockChartPanel;
     private java.util.function.IntConsumer navigator;
     static final int RPP=5;
     private String[] cols={"ID","Medicine Name","Category","Stock","Price (\u20b9)","Expiry Date","Status","Action"};
@@ -42,17 +51,19 @@ public class DashboardPanel extends JPanel {
         sharedTableModel = new DefaultTableModel(columns, 0){
             public boolean isCellEditable(int r, int c){ return c == 7; }
         };
-        sharedTableModel.addRow(new Object[]{1001,"Dolo 650","Tablet",28,"35.00","Jan 2027","In Stock",""});
-        sharedTableModel.addRow(new Object[]{1002,"Paracetamol","Tablet",50,"20.00","Dec 2026","In Stock",""});
-        sharedTableModel.addRow(new Object[]{1003,"Amoxicillin 500mg","Capsule",15,"60.00","Aug 2026","Low Stock",""});
-        sharedTableModel.addRow(new Object[]{1004,"Azithromycin 250","Tablet",9,"45.00","Jul 2026","Low Stock",""});
-        sharedTableModel.addRow(new Object[]{1005,"Cetrizine 10mg","Tablet",2,"18.00","Jun 2026","Critical",""});
-        sharedTableModel.addRow(new Object[]{1006,"Ibuprofen 400mg","Tablet",35,"30.00","Mar 2027","In Stock",""});
-        sharedTableModel.addRow(new Object[]{1007,"Metformin 500mg","Tablet",60,"25.00","Feb 2027","In Stock",""});
-        sharedTableModel.addRow(new Object[]{1008,"Omeprazole 20mg","Capsule",5,"45.00","Sep 2026","Critical",""});
-        sharedTableModel.addRow(new Object[]{1009,"Atorvastatin 10mg","Tablet",22,"55.00","Nov 2026","In Stock",""});
-        sharedTableModel.addRow(new Object[]{1010,"Pantoprazole 40mg","Capsule",8,"40.00","Oct 2026","Low Stock",""});
+        loadMedicinesFromDatabase();
         sharedTable = new JTable(sharedTableModel);
+    }
+
+    private static void loadMedicinesFromDatabase() {
+        Vector<Vector> data = sharedTableModel.getDataVector();
+        data.clear();
+        for(Object[] row:DatabaseManager.getAllMedicines()){
+            Vector<Object> values=new Vector<>();
+            for(Object value:row) values.add(value);
+            data.add(values);
+        }
+        sharedTableModel.fireTableDataChanged();
     }
 
     public DashboardPanel() {
@@ -60,7 +71,7 @@ public class DashboardPanel extends JPanel {
         initializeSharedTable();
         initModel();
         JPanel top=new JPanel(new BorderLayout()); top.setOpaque(false);
-        top.add(buildStatCards(),BorderLayout.NORTH);
+        top.add(buildDashboardSummary(),BorderLayout.NORTH);
         JPanel mid=new JPanel(new BorderLayout(16,0)); mid.setOpaque(false);
         mid.setBorder(BorderFactory.createEmptyBorder(20,0,0,0));
         mid.add(buildTableSection(),BorderLayout.CENTER);
@@ -117,6 +128,37 @@ public class DashboardPanel extends JPanel {
         return row;
     }
 
+    private JPanel buildDashboardSummary() {
+        JPanel wrap=new JPanel();
+        wrap.setLayout(new BoxLayout(wrap,BoxLayout.Y_AXIS));
+        wrap.setOpaque(false);
+        JPanel actions=new JPanel(new FlowLayout(FlowLayout.RIGHT,0,0));
+        actions.setOpaque(false);
+        actions.setBorder(BorderFactory.createEmptyBorder(12,0,0,0));
+        JButton reportStatus=pinkBtn("Report Status");
+        reportStatus.addActionListener(e->{
+            stockChartPanel.setVisible(true);
+            stockChartPanel.restartAnimation();
+            wrap.revalidate();
+            wrap.repaint();
+        });
+        actions.add(reportStatus);
+        stockChartPanel=new StockOverviewPanel();
+        stockChartPanel.setVisible(false);
+        stockChartPanel.setAlignmentX(0f);
+        stockChartPanel.setCloseAction(()->{
+            stockChartPanel.setVisible(false);
+            wrap.revalidate();
+            wrap.repaint();
+        });
+        sharedTableModel.addTableModelListener(e->stockChartPanel.refreshData());
+        wrap.add(buildStatCards());
+        wrap.add(actions);
+        wrap.add(Box.createVerticalStrut(12));
+        wrap.add(stockChartPanel);
+        return wrap;
+    }
+
     private JPanel statCard(Icon icon,String label,JLabel valLbl,Color ic,String sub,Color sc,Color bg) {
         JPanel c=new JPanel(){
             protected void paintComponent(Graphics g){
@@ -150,7 +192,7 @@ public class DashboardPanel extends JPanel {
         title.setIcon(sectionIcon(0)); title.setIconTextGap(6);
         JButton addBtn=pinkBtn("+ Add Medicine");
         addBtn.addActionListener(e->showAddDialog());
-        hdr.add(title,BorderLayout.WEST); hdr.add(addBtn,BorderLayout.EAST);
+        hdr.add(title,BorderLayout.WEST); hdr.add(exportButtons(addBtn),BorderLayout.EAST);
         sec.add(hdr,BorderLayout.NORTH);
         JPanel body=new JPanel(new BorderLayout(0,8)); body.setOpaque(false);
         JTextField search=new JTextField("  Search medicine by name, category or company...");
@@ -288,8 +330,9 @@ public class DashboardPanel extends JPanel {
                 int id=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,0)));
                 if(id>=nextId)nextId=id+1;
             }
-            Object[] newRow=new Object[]{String.valueOf(nextId),nm,(String)catF.getSelectedItem(),stk,pr,exp,status(stkVal),""};
-            sharedTableModel.addRow(newRow);
+            Object[] newRow=new Object[]{String.valueOf(nextId),nm,(String)catF.getSelectedItem(),stk,pr,exp,status(stkVal),co};
+            DatabaseManager.addMedicine(newRow);
+            loadMedicinesFromDatabase();
             currentPage=(int)Math.ceil(sharedTableModel.getRowCount()/(double)RPP);
             refreshTable();
             updateStats(); dlg.dispose();
@@ -297,7 +340,13 @@ public class DashboardPanel extends JPanel {
         });
         btns.add(cancel); btns.add(addB);
         p.add(btns);
-        dlg.setContentPane(p); dlg.setVisible(true);
+        JScrollPane scroll=new JScrollPane(p);
+        scroll.setBorder(null);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getViewport().setBackground(WHITE);
+        scroll.getVerticalScrollBar().setUnitIncrement(12);
+        applyTransparentScrollBar(scroll);
+        dlg.setContentPane(scroll); dlg.setVisible(true);
     }
 
     private JTextField addField(JPanel p,String label) {
@@ -313,7 +362,10 @@ public class DashboardPanel extends JPanel {
         return tf;
     }
 
-    void updateStats(){totalLbl.setText(String.valueOf(sharedTableModel.getRowCount()));}
+    void updateStats(){
+        totalLbl.setText(String.valueOf(sharedTableModel.getRowCount()));
+        if(stockChartPanel!=null)stockChartPanel.refreshData();
+    }
 
     private JPanel buildRightPanel() {
         JPanel r=new JPanel(); r.setLayout(new BoxLayout(r,BoxLayout.Y_AXIS));
@@ -389,7 +441,7 @@ public class DashboardPanel extends JPanel {
         JLabel t=new JLabel(" All Medicines"); t.setFont(FB16); t.setForeground(DARK);
         t.setIcon(sectionIcon(0)); t.setIconTextGap(6);
         JButton ab=pinkBtn("+ Add Medicine"); ab.addActionListener(e->showAddDialog());
-        hdr.add(t,BorderLayout.WEST); hdr.add(ab,BorderLayout.EAST);
+        hdr.add(t,BorderLayout.WEST); hdr.add(exportButtons(ab),BorderLayout.EAST);
         p.add(hdr,BorderLayout.NORTH);
         medicinesTable = new JTable(sharedTableModel);
         styleTable(medicinesTable);
@@ -835,6 +887,215 @@ public class DashboardPanel extends JPanel {
         return b;
     }
 
+    private JPanel exportButtons(JButton addButton) {
+        JPanel buttons=new JPanel(new FlowLayout(FlowLayout.RIGHT,8,0));
+        buttons.setOpaque(false);
+        JButton csv=outlinePinkBtn("Export CSV");
+        JButton pdf=outlinePinkBtn("Export PDF");
+        csv.setIcon(exportIcon("CSV"));
+        pdf.setIcon(exportIcon("PDF"));
+        csv.setIconTextGap(6);
+        pdf.setIconTextGap(6);
+        csv.addActionListener(e->exportCsv());
+        pdf.addActionListener(e->exportPdf());
+        buttons.add(csv);
+        buttons.add(pdf);
+        buttons.add(addButton);
+        return buttons;
+    }
+
+    private JButton outlinePinkBtn(String text) {
+        JButton b=new JButton(text){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(WHITE);g2.fill(new RoundRectangle2D.Float(0,0,getWidth(),getHeight(),20,20));
+                g2.setColor(PINK);g2.setStroke(new BasicStroke(1.4f));
+                g2.draw(new RoundRectangle2D.Float(0,0,getWidth()-1,getHeight()-1,20,20));
+                g2.dispose();super.paintComponent(g);
+            }
+        };
+        b.setFont(FB13);b.setForeground(PINK);b.setOpaque(false);b.setContentAreaFilled(false);
+        b.setBorderPainted(false);b.setFocusPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setPreferredSize(new Dimension(150,32));
+        return b;
+    }
+
+    private Icon exportIcon(String label) {
+        return new Icon(){
+            public int getIconWidth(){return 18;}
+            public int getIconHeight(){return 18;}
+            public void paintIcon(Component c,Graphics g,int x,int y){
+                Graphics2D g2=(Graphics2D)g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.translate(x,y);
+                g2.setColor(WHITE);
+                g2.fillRoundRect(2,1,13,16,3,3);
+                g2.setColor(PINK);
+                g2.setStroke(new BasicStroke(1.2f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+                g2.drawRoundRect(2,1,13,16,3,3);
+                g2.drawLine(5,6,12,6);
+                g2.drawLine(5,9,12,9);
+                g2.drawLine(5,12,10,12);
+                g2.setFont(new Font("Segoe UI",Font.BOLD,5));
+                FontMetrics fm=g2.getFontMetrics();
+                g2.drawString(label,2+(13-fm.stringWidth(label))/2,16);
+                g2.dispose();
+            }
+        };
+    }
+
+    private void exportCsv() {
+        JFileChooser chooser=new JFileChooser();
+        chooser.setDialogTitle("Save CSV");
+        chooser.setSelectedFile(new File("medicine_inventory.csv"));
+        if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        File file=ensureExtension(chooser.getSelectedFile(),".csv");
+        try(PrintWriter out=new PrintWriter(new OutputStreamWriter(new FileOutputStream(file),"UTF-8"))){
+            out.println("ID,Medicine Name,Category,Stock,Price,Expiry Date,Status");
+            for(int r=0;r<sharedTableModel.getRowCount();r++){
+                for(int c=0;c<7;c++){
+                    if(c>0) out.print(",");
+                    out.print(csvValue(sharedTableModel.getValueAt(r,c)));
+                }
+                out.println();
+            }
+            JOptionPane.showMessageDialog(this,"CSV exported successfully!","Success",JOptionPane.INFORMATION_MESSAGE);
+        }catch(IOException ex){
+            JOptionPane.showMessageDialog(this,"Unable to export CSV: "+ex.getMessage(),"Export Error",JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private String csvValue(Object value) {
+        String text=String.valueOf(value==null?"":value);
+        if(text.contains(",")||text.contains("\"")||text.contains("\n")||text.contains("\r")){
+            text="\""+text.replace("\"","\"\"")+"\"";
+        }
+        return text;
+    }
+
+    private void exportPdf() {
+        JFileChooser chooser=new JFileChooser();
+        chooser.setDialogTitle("Save PDF");
+        chooser.setSelectedFile(new File("medicine_inventory.pdf"));
+        if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        File file=ensureExtension(chooser.getSelectedFile(),".pdf");
+        try{
+            System.setProperty("sun.java2d.print.enableAWT","true");
+            PrintService pdfService=findPdfPrintService();
+            if(pdfService==null){
+                JOptionPane.showMessageDialog(this,"No PDF print service found on this computer.","Export Error",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            PrinterJob job=PrinterJob.getPrinterJob();
+            job.setPrintService(pdfService);
+            PageFormat format=job.defaultPage();
+            Book book=new Book();
+            book.append(new InventoryReportPrintable(),format);
+            job.setPageable(book);
+            PrintRequestAttributeSet attrs=new HashPrintRequestAttributeSet();
+            attrs.add(new Destination(file.toURI()));
+            job.print(attrs);
+            JOptionPane.showMessageDialog(this,"PDF exported successfully!","Success",JOptionPane.INFORMATION_MESSAGE);
+        }catch(Exception ex){
+            JOptionPane.showMessageDialog(this,"Unable to export PDF: "+ex.getMessage(),"Export Error",JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private PrintService findPdfPrintService() {
+        PrintService[] services=PrintServiceLookup.lookupPrintServices(DocFlavor.SERVICE_FORMATTED.PAGEABLE,null);
+        for(PrintService service:services){
+            String name=service.getName().toLowerCase();
+            if(name.contains("pdf")) return service;
+        }
+        return null;
+    }
+
+    private File ensureExtension(File file,String extension) {
+        String path=file.getAbsolutePath();
+        if(!path.toLowerCase().endsWith(extension)) return new File(path+extension);
+        return file;
+    }
+
+    private class InventoryReportPrintable implements Printable {
+        public int print(Graphics graphics,PageFormat pageFormat,int pageIndex) {
+            if(pageIndex>0) return NO_SUCH_PAGE;
+            Graphics2D g=(Graphics2D)graphics;
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+            int x=(int)pageFormat.getImageableX()+24;
+            int y=(int)pageFormat.getImageableY()+32;
+            int width=(int)pageFormat.getImageableWidth()-48;
+            String date=new SimpleDateFormat("dd MMM yyyy").format(new Date());
+
+            g.setColor(DARK);
+            g.setFont(new Font("Segoe UI",Font.BOLD,18));
+            drawCentered(g,"Pharmacy Inventory System",x,y,width);
+            y+=26;
+            g.setFont(new Font("Segoe UI",Font.PLAIN,11));
+            drawCentered(g,"Medicine Inventory Report - "+date,x,y,width);
+            y+=24;
+
+            String[] headers={"ID","Name","Category","Stock","Price","Expiry","Status"};
+            int[] colWidths={48,140,78,48,62,80,82};
+            int totalWidth=0;
+            for(int w:colWidths) totalWidth+=w;
+            if(totalWidth>width){
+                double scale=width/(double)totalWidth;
+                totalWidth=0;
+                for(int i=0;i<colWidths.length;i++){colWidths[i]=(int)Math.floor(colWidths[i]*scale);totalWidth+=colWidths[i];}
+            }
+
+            int rowHeight=22;
+            int tableX=x+(width-totalWidth)/2;
+            int tableY=y;
+            int rows=sharedTableModel.getRowCount()+1;
+            int tableHeight=rows*rowHeight;
+            g.setColor(Color.BLACK);
+            g.drawRect(tableX,tableY,totalWidth,tableHeight);
+            int cx=tableX;
+            for(int i=0;i<colWidths.length;i++){
+                if(i>0) g.drawLine(cx,tableY,cx,tableY+tableHeight);
+                cx+=colWidths[i];
+            }
+            for(int r=1;r<=rows;r++) g.drawLine(tableX,tableY+(r*rowHeight),tableX+totalWidth,tableY+(r*rowHeight));
+
+            g.setFont(new Font("Segoe UI",Font.BOLD,9));
+            cx=tableX;
+            for(int c=0;c<headers.length;c++){
+                drawCellText(g,headers[c],cx+4,tableY+15,colWidths[c]-8);
+                cx+=colWidths[c];
+            }
+
+            g.setFont(new Font("Segoe UI",Font.PLAIN,9));
+            for(int r=0;r<sharedTableModel.getRowCount();r++){
+                cx=tableX;
+                for(int c=0;c<7;c++){
+                    drawCellText(g,String.valueOf(sharedTableModel.getValueAt(r,c)),cx+4,tableY+rowHeight*(r+1)+15,colWidths[c]-8);
+                    cx+=colWidths[c];
+                }
+            }
+
+            int footerY=(int)(pageFormat.getImageableY()+pageFormat.getImageableHeight()-22);
+            g.setFont(new Font("Segoe UI",Font.PLAIN,9));
+            drawCentered(g,"Generated on "+date+" | Page 1 of 1",x,footerY,width);
+            return PAGE_EXISTS;
+        }
+    }
+
+    private void drawCentered(Graphics2D g,String text,int x,int y,int width) {
+        FontMetrics fm=g.getFontMetrics();
+        g.drawString(text,x+(width-fm.stringWidth(text))/2,y);
+    }
+
+    private void drawCellText(Graphics2D g,String text,int x,int y,int maxWidth) {
+        FontMetrics fm=g.getFontMetrics();
+        String value=text;
+        while(value.length()>0&&fm.stringWidth(value)>maxWidth) value=value.substring(0,value.length()-1);
+        if(!value.equals(text)&&value.length()>3) value=value.substring(0,value.length()-3)+"...";
+        g.drawString(value,x,y);
+    }
+
     static Icon statIcon(int type,Color color){
         return new Icon(){public int getIconWidth(){return 28;}public int getIconHeight(){return 28;}
             public void paintIcon(Component c,Graphics g,int x,int y){
@@ -1039,16 +1300,181 @@ public class DashboardPanel extends JPanel {
             String nm=nf.getText().trim(),stk=sf.getText().trim(),pr=pf.getText().trim(),exp=ef.getText().trim();
             if(nm.isEmpty()||stk.isEmpty()||pr.isEmpty()||exp.isEmpty()){JOptionPane.showMessageDialog(dlg,"Fill all fields!");return;}
             int sv;try{sv=Integer.parseInt(stk);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Stock must be number!");return;}
-            sharedTableModel.setValueAt(nm, dataIdx, 1);
-            sharedTableModel.setValueAt(cf.getSelectedItem(), dataIdx, 2);
-            sharedTableModel.setValueAt(stk, dataIdx, 3);
-            sharedTableModel.setValueAt(pr, dataIdx, 4);
-            sharedTableModel.setValueAt(exp, dataIdx, 5);
-            sharedTableModel.setValueAt(status(sv), dataIdx, 6);
+            Object[] row=new Object[]{
+                sharedTableModel.getValueAt(dataIdx,0),
+                nm,
+                cf.getSelectedItem(),
+                stk,
+                pr,
+                exp,
+                status(sv)
+            };
+            DatabaseManager.updateMedicine(row);
+            loadMedicinesFromDatabase();
             refreshTable();dlg.dispose();JOptionPane.showMessageDialog(this,"Medicine updated!");
         });
         btns.add(cancel);btns.add(save);p.add(btns);
         dlg.setContentPane(p);dlg.setVisible(true);
+    }
+
+    private static class StockOverviewPanel extends JPanel {
+        private final String[] categories={"Tablet","Capsule","Syrup","Injection"};
+        private final int[] totals=new int[categories.length];
+        private final Rectangle[] bars=new Rectangle[categories.length];
+        private Rectangle closeRect=new Rectangle();
+        private Runnable closeAction;
+        private int hover=-1,frame=0;
+        private boolean closeHover=false;
+        private Timer anim;
+
+        StockOverviewPanel(){
+            setOpaque(false);
+            setPreferredSize(new Dimension(0,180));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE,180));
+            setToolTipText("");
+            refreshData();
+            MouseAdapter ma=new MouseAdapter(){
+                public void mouseMoved(MouseEvent e){updateHover(e.getPoint());}
+                public void mouseExited(MouseEvent e){hover=-1;setToolTipText(null);repaint();}
+                public void mouseClicked(MouseEvent e){
+                    if(closeRect.contains(e.getPoint())&&closeAction!=null)closeAction.run();
+                }
+            };
+            addMouseMotionListener(ma);
+            addMouseListener(ma);
+        }
+
+        void setCloseAction(Runnable closeAction){
+            this.closeAction=closeAction;
+        }
+
+        void refreshData(){
+            for(int i=0;i<totals.length;i++)totals[i]=0;
+            if(sharedTableModel!=null){
+                for(int r=0;r<sharedTableModel.getRowCount();r++){
+                    String cat=String.valueOf(sharedTableModel.getValueAt(r,2));
+                    int stock=0;
+                    try{stock=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(r,3)));}catch(Exception ignored){}
+                    for(int i=0;i<categories.length;i++)if(categories[i].equals(cat))totals[i]+=stock;
+                }
+            }
+            repaint();
+        }
+
+        void restartAnimation(){
+            frame=0;
+            if(anim!=null&&anim.isRunning())anim.stop();
+            anim=new Timer(16,e->{
+                frame++;
+                repaint();
+                if(frame>=20)((Timer)e.getSource()).stop();
+            });
+            anim.start();
+        }
+
+        public String getToolTipText(MouseEvent e){
+            updateHover(e.getPoint());
+            if(hover>=0)return "Category: "+categories[hover]+" | Total Stock: "+totals[hover];
+            return null;
+        }
+
+        private void updateHover(Point p){
+            boolean nextClose=closeRect.contains(p);
+            int next=-1;
+            if(!nextClose)for(int i=0;i<bars.length;i++)if(bars[i]!=null&&bars[i].contains(p)){next=i;break;}
+            if(next!=hover||nextClose!=closeHover){
+                hover=next;
+                closeHover=nextClose;
+                setCursor(Cursor.getPredefinedCursor(closeHover?Cursor.HAND_CURSOR:Cursor.DEFAULT_CURSOR));
+                if(hover>=0)setToolTipText("Category: "+categories[hover]+" | Total Stock: "+totals[hover]);
+                else setToolTipText(null);
+                repaint();
+            }
+        }
+
+        protected void paintComponent(Graphics g){
+            Graphics2D g2=(Graphics2D)g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+            int w=getWidth(),h=getHeight();
+            g2.setColor(WHITE);
+            g2.fill(new RoundRectangle2D.Float(0,0,w-1,h-1,12,12));
+            g2.setColor(new Color(0xF0,0xD8,0xDF));
+            g2.draw(new RoundRectangle2D.Float(0,0,w-1,h-1,12,12));
+
+            int pad=16;
+            g2.setFont(new Font("Segoe UI Emoji",Font.BOLD,14));
+            g2.setColor(DARK);
+            g2.drawString("\uD83D\uDCCA Stock Overview by Category",pad,28);
+            g2.setFont(F12);
+            g2.setColor(GRAY);
+            g2.drawString("Live from your medicine table",w-pad-170,28);
+            closeRect.setBounds(w-pad-28,10,20,20);
+            g2.setColor(closeHover?new Color(0xFC,0xE4,0xEC):WHITE);
+            g2.fill(new RoundRectangle2D.Float(closeRect.x,closeRect.y,closeRect.width,closeRect.height,8,8));
+            g2.setColor(closeHover?PINK:GRAY);
+            g2.setStroke(new BasicStroke(1.7f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+            g2.draw(new RoundRectangle2D.Float(closeRect.x,closeRect.y,closeRect.width-1,closeRect.height-1,8,8));
+            g2.drawLine(closeRect.x+6,closeRect.y+6,closeRect.x+14,closeRect.y+14);
+            g2.drawLine(closeRect.x+14,closeRect.y+6,closeRect.x+6,closeRect.y+14);
+
+            int chartX=pad+40,chartY=42,chartW=w-pad*2-55,chartH=82;
+            int axisY=chartY+chartH;
+            int max=1;
+            for(int v:totals)if(v>max)max=v;
+            Stroke oldStroke=g2.getStroke();
+            g2.setFont(new Font("Segoe UI",Font.PLAIN,11));
+            FontMetrics fm=g2.getFontMetrics();
+            for(int i=0;i<=5;i++){
+                int val=(int)Math.round(max-(max*(i/5.0)));
+                int y=chartY+(int)Math.round((i/5.0)*chartH);
+                g2.setColor(GRAY);
+                String label=String.valueOf(val);
+                g2.drawString(label,chartX-10-fm.stringWidth(label),y+4);
+                g2.setColor(new Color(0xF0,0xE8,0xEA));
+                g2.setStroke(new BasicStroke(1f,BasicStroke.CAP_BUTT,BasicStroke.JOIN_BEVEL,0,new float[]{5f,5f},0));
+                g2.drawLine(chartX,y,chartX+chartW,y);
+            }
+            g2.setStroke(oldStroke);
+            g2.setColor(new Color(0xE0,0xD0,0xD5));
+            g2.drawLine(chartX,axisY,chartX+chartW,axisY);
+
+            int barW=40,gap=20,totalBarW=categories.length*barW+(categories.length-1)*gap;
+            int startX=chartX+(chartW-totalBarW)/2;
+            double progress=Math.min(1.0,frame/20.0);
+            if(!isVisible())progress=0;
+            for(int i=0;i<categories.length;i++){
+                int fullH=max==0?0:(int)Math.round((totals[i]/(double)max)*(chartH-12));
+                int bh=(int)Math.round(fullH*progress);
+                int x=startX+i*(barW+gap),y=axisY-bh;
+                bars[i]=new Rectangle(x,y,barW,bh);
+                g2.setColor(i==hover?new Color(0xE9,0x1E,0x63):new Color(0xC9,0x63,0x7A,200));
+                g2.fill(new RoundRectangle2D.Float(x,y,barW,bh,8,8));
+                g2.setFont(new Font("Segoe UI",Font.PLAIN,11));
+                g2.setColor(PINK);
+                String value=String.valueOf(totals[i]);
+                g2.drawString(value,x+(barW-fm.stringWidth(value))/2,y-5);
+                g2.setColor(GRAY);
+                g2.drawString(categories[i],x+(barW-fm.stringWidth(categories[i]))/2,axisY+18);
+            }
+
+            g2.setColor(new Color(0xF0,0xD8,0xDF));
+            g2.drawLine(pad,h-32,w-pad,h-32);
+            int statsY=h-13;
+            g2.setFont(F12);
+            drawMiniStat(g2,"Most Stocked: Paracetamol (50)",GREEN,pad,statsY);
+            int x2=pad+190;
+            g2.setColor(new Color(0xB0,0xA0,0xA5));g2.drawString("|",x2,statsY);
+            drawMiniStat(g2,"Critical Items: 2",RED,x2+18,statsY);
+            int x3=x2+130;
+            g2.setColor(new Color(0xB0,0xA0,0xA5));g2.drawString("|",x3,statsY);
+            drawMiniStat(g2,"Expiring This Month: 1",ORANGE,x3+18,statsY);
+            g2.dispose();
+        }
+
+        private void drawMiniStat(Graphics2D g2,String text,Color color,int x,int y){
+            g2.setColor(color);
+            g2.drawString(text,x,y);
+        }
     }
 
     // Action column cell editor
@@ -1066,7 +1492,10 @@ public class DashboardPanel extends JPanel {
             del.addActionListener(e->{fireEditingStopped();int di=table.convertRowIndexToModel(row);if(di<sharedTableModel.getRowCount()){
                 String nm=(String)sharedTableModel.getValueAt(di,1);
                 if(JOptionPane.showConfirmDialog(dp,"Delete "+nm+"?","Delete",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION){
-                    sharedTableModel.removeRow(di);dp.refreshTable();dp.updateStats();}}});
+                    int id=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(di,0)));
+                    DatabaseManager.deleteMedicine(id);
+                    loadMedicinesFromDatabase();
+                    dp.refreshTable();dp.updateStats();}}});
             panel.add(edit);panel.add(del);}
         public Component getTableCellEditorComponent(JTable t,Object v,boolean sel,int r,int c){
             row=r;panel.setBackground(sel?new Color(252,228,236):WHITE);return panel;}
