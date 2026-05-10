@@ -29,10 +29,9 @@ A premium, high-performance Java Swing desktop application designed to streamlin
    ```
 4. **Run**: 
    ```bash
-   java -Dfile.encoding=UTF-8 PharmacyInventorySystem
+   java PharmacyInventorySystem
    ```
-   *💡 Note: The `-Dfile.encoding=UTF-8` flag ensures all emojis and special characters render perfectly on all systems.*
-
+   *💡 Tip: If emojis look broken, use `java "-Dfile.encoding=UTF-8" PharmacyInventorySystem` instead.*
 ---
 
 ## 🛠️ Tech Stack
