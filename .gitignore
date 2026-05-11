@@ -11,3 +11,4 @@ out/
 *.jar
 pharmacy.db
 .codex/
+scratch/

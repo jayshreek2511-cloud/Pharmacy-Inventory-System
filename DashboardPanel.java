@@ -338,16 +338,20 @@ public class DashboardPanel extends JPanel {
                 JOptionPane.showMessageDialog(dlg,"Please fill all fields!","Error",JOptionPane.ERROR_MESSAGE);return;
             }
             int stkVal;
-            try{stkVal=Integer.parseInt(stk);}catch(Exception ex){
-                JOptionPane.showMessageDialog(dlg,"Stock must be a number!","Error",JOptionPane.ERROR_MESSAGE);return;}
-            try{Double.parseDouble(pr);}catch(Exception ex){
-                JOptionPane.showMessageDialog(dlg,"Price must be a valid number!","Error",JOptionPane.ERROR_MESSAGE);return;}
+            double priceVal;
+            try{stkVal=validStock(stk);}catch(Exception ex){
+                JOptionPane.showMessageDialog(dlg,"Stock must be zero or more.","Error",JOptionPane.ERROR_MESSAGE);return;}
+            try{priceVal=validPrice(pr);}catch(Exception ex){
+                JOptionPane.showMessageDialog(dlg,"Price must be greater than zero.","Error",JOptionPane.ERROR_MESSAGE);return;}
+            if(parseExpiryDate(exp)==null){
+                JOptionPane.showMessageDialog(dlg,"Expiry date must be like MM/YYYY, Jan 2027, or YYYY-MM-DD.","Error",JOptionPane.ERROR_MESSAGE);return;
+            }
             int nextId=1006;
             for(int i=0;i<sharedTableModel.getRowCount();i++){
                 int id=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,0)));
                 if(id>=nextId)nextId=id+1;
             }
-            Object[] newRow=new Object[]{String.valueOf(nextId),nm,(String)catF.getSelectedItem(),stk,pr,exp,status(stkVal),co};
+            Object[] newRow=new Object[]{String.valueOf(nextId),nm,(String)catF.getSelectedItem(),stkVal,String.format("%.2f",priceVal),exp,status(stkVal),co};
             DatabaseManager.addMedicine(newRow);
             loadMedicinesFromDatabase();
             currentPage=(int)Math.ceil(sharedTableModel.getRowCount()/(double)RPP);
@@ -434,6 +438,18 @@ public class DashboardPanel extends JPanel {
         try{return YearMonth.parse(value,monthNumber).atEndOfMonth();}catch(DateTimeParseException ignored){}
         try{return LocalDate.parse(value);}catch(DateTimeParseException ignored){}
         return null;
+    }
+
+    private int validStock(String text) {
+        int stock=Integer.parseInt(text.trim());
+        if(stock<0)throw new NumberFormatException();
+        return stock;
+    }
+
+    private double validPrice(String text) {
+        double price=Double.parseDouble(text.trim());
+        if(price<=0)throw new NumberFormatException();
+        return price;
     }
 
     private void showMedicineList(String title,List<Object[]> rows) {
@@ -638,24 +654,26 @@ public class DashboardPanel extends JPanel {
         t.setIcon(qaIcon(1)); t.setIconTextGap(8);
         main.add(t,BorderLayout.NORTH);
 
-        JPanel form=rndPanel(); form.setLayout(new GridLayout(2,4,10,10));
+        JPanel form=rndPanel(); form.setLayout(new GridLayout(2,5,10,10));
         form.setBorder(BorderFactory.createEmptyBorder(16,16,16,16));
         JComboBox<String> medBox=new JComboBox<>(medicineNames()); medBox.setFont(F13);
+        JComboBox<String> paymentField=new JComboBox<>(new String[]{"Cash","UPI","Card"}); paymentField.setFont(F13);
         JTextField qtyField=input("1"), discountField=input("0");
-        JTextField customerField=input("Walk-in"), mobileField=input(""), paymentField=input("Cash");
+        JTextField customerField=input("Walk-in"), mobileField=input("");
         form.add(labeled("Medicine",medBox));
         form.add(labeled("Qty",qtyField));
         form.add(labeled("Discount %",discountField));
         JButton add=pinkBtn("+ Add Item"); form.add(add);
+        JButton remove=pinkBtn("Remove Item"); form.add(remove);
         form.add(labeled("Customer",customerField));
         form.add(labeled("Mobile",mobileField));
         form.add(labeled("Payment",paymentField));
         JButton print=pinkBtn("Generate Bill"); form.add(print);
+        JButton history=pinkBtn("Bill History"); history.addActionListener(e->showRevenueHistory()); form.add(history);
         main.add(form,BorderLayout.CENTER);
 
         String[] cols={"Item","Qty","Price","Amount"};
-        Object[][] rows={};
-        JTable billTable=simpleTable(cols,rows);
+        JTable billTable=simpleTable(cols,new Object[][]{});
         DefaultTableModel billModel=(DefaultTableModel)billTable.getModel();
         JScrollPane sp=new JScrollPane(billTable); sp.setBorder(BorderFactory.createLineBorder(BRD));
         sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
@@ -663,7 +681,7 @@ public class DashboardPanel extends JPanel {
 
         JPanel side=new JPanel(); side.setOpaque(false); side.setLayout(new BoxLayout(side,BoxLayout.Y_AXIS));
         side.setPreferredSize(new Dimension(260,0));
-        JLabel subtotalValue=new JLabel("â‚¹0.00"), taxValue=new JLabel("â‚¹0.00"), totalValue=new JLabel("â‚¹0.00");
+        JLabel subtotalValue=new JLabel("\u20b90.00"), taxValue=new JLabel("\u20b90.00"), totalValue=new JLabel("\u20b90.00");
         side.add(totalCard("Subtotal",subtotalValue,sectionIcon(0),new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00)));
         side.add(Box.createVerticalStrut(12));
         side.add(totalCard("Tax",taxValue,sectionIcon(2),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
@@ -674,15 +692,16 @@ public class DashboardPanel extends JPanel {
         Runnable updateTotals=()->{
             double subtotal=0;
             for(int i=0;i<billModel.getRowCount();i++) subtotal+=Double.parseDouble(String.valueOf(billModel.getValueAt(i,3)));
-            double discount=0;
-            try{discount=Double.parseDouble(discountField.getText().trim());}catch(Exception ex){}
+            double discount;
+            try{discount=validDiscount(discountField.getText().trim());}catch(IllegalArgumentException ex){discount=0;}
             subtotal=subtotal-(subtotal*discount/100.0);
             double tax=subtotal*0.05,total=subtotal+tax;
-            subtotalValue.setText("â‚¹"+String.format("%.2f",subtotal));
-            taxValue.setText("â‚¹"+String.format("%.2f",tax));
-            totalValue.setText("â‚¹"+String.format("%.2f",total));
+            subtotalValue.setText("\u20b9"+String.format("%.2f",subtotal));
+            taxValue.setText("\u20b9"+String.format("%.2f",tax));
+            totalValue.setText("\u20b9"+String.format("%.2f",total));
         };
         add.addActionListener(e->{
+            if(medBox.getItemCount()==0){JOptionPane.showMessageDialog(this,"No medicines available for billing.","Billing",JOptionPane.WARNING_MESSAGE);return;}
             int qty;
             try{qty=Integer.parseInt(qtyField.getText().trim()); if(qty<=0)throw new NumberFormatException();}catch(Exception ex){
                 JOptionPane.showMessageDialog(this,"Enter a valid quantity.","Billing",JOptionPane.ERROR_MESSAGE);return;}
@@ -697,14 +716,29 @@ public class DashboardPanel extends JPanel {
             billModel.addRow(new Object[]{name,qty,String.format("%.2f",price),String.format("%.2f",qty*price)});
             updateTotals.run();
         });
+        remove.addActionListener(e->{
+            int row=billTable.getSelectedRow();
+            if(row<0){JOptionPane.showMessageDialog(this,"Select an item to remove.","Billing",JOptionPane.INFORMATION_MESSAGE);return;}
+            billModel.removeRow(billTable.convertRowIndexToModel(row));
+            updateTotals.run();
+        });
         print.addActionListener(e->{
             if(billModel.getRowCount()==0){JOptionPane.showMessageDialog(this,"Add at least one item before generating a bill.","Billing",JOptionPane.WARNING_MESSAGE);return;}
+            if(!isValidMobile(mobileField.getText().trim())){JOptionPane.showMessageDialog(this,"Enter a valid 10 digit mobile number or leave it blank.","Billing",JOptionPane.ERROR_MESSAGE);return;}
+            try{validDiscount(discountField.getText().trim());}catch(IllegalArgumentException ex){JOptionPane.showMessageDialog(this,ex.getMessage(),"Billing",JOptionPane.ERROR_MESSAGE);return;}
             if(!hasAvailableStockForBill(billModel))return;
             BillTotals totals=calculateBillTotals(billModel,discountField);
+            String preview="Customer: "+customerField.getText().trim()+
+                "\nMobile: "+mobileField.getText().trim()+
+                "\nPayment: "+paymentField.getSelectedItem()+
+                "\nItems: "+billModel.getRowCount()+
+                "\nTotal: \u20b9"+String.format("%.2f",totals.total)+
+                "\n\nGenerate this bill?";
+            if(JOptionPane.showConfirmDialog(this,preview,"Confirm Bill",JOptionPane.YES_NO_OPTION)!=JOptionPane.YES_OPTION)return;
             int billId=BillingService.saveBillAndUpdateStock(
                 customerField.getText().trim(),
                 mobileField.getText().trim(),
-                paymentField.getText().trim(),
+                String.valueOf(paymentField.getSelectedItem()),
                 totals.subtotal,
                 totals.tax,
                 totals.total,
@@ -715,7 +749,7 @@ public class DashboardPanel extends JPanel {
             updateStats();
             JOptionPane.showMessageDialog(this,
                 "Bill #"+billId+" generated for "+customerField.getText().trim()+"\nMobile: "+mobileField.getText().trim()+
-                "\nPayment: "+paymentField.getText().trim()+"\nTotal: "+totalValue.getText(),
+                "\nPayment: "+paymentField.getSelectedItem()+"\nTotal: "+totalValue.getText(),
                 "Bill Generated",JOptionPane.INFORMATION_MESSAGE);
             billModel.setRowCount(0);
             updateTotals.run();
@@ -769,11 +803,24 @@ public class DashboardPanel extends JPanel {
     private BillTotals calculateBillTotals(DefaultTableModel billModel,JTextField discountField) {
         double subtotal=0;
         for(int i=0;i<billModel.getRowCount();i++) subtotal+=Double.parseDouble(String.valueOf(billModel.getValueAt(i,3)));
-        double discount=0;
-        try{discount=Double.parseDouble(discountField.getText().trim());}catch(Exception ex){}
+        double discount=validDiscount(discountField.getText().trim());
         subtotal=subtotal-(subtotal*discount/100.0);
         double tax=subtotal*0.05,total=subtotal+tax;
         return new BillTotals(subtotal,tax,total);
+    }
+
+    private double validDiscount(String text) {
+        try{
+            double discount=Double.parseDouble(text.isEmpty()?"0":text);
+            if(discount<0||discount>100)throw new NumberFormatException();
+            return discount;
+        }catch(Exception ex){
+            throw new IllegalArgumentException("Discount must be between 0 and 100.");
+        }
+    }
+
+    private boolean isValidMobile(String mobile) {
+        return mobile.isEmpty()||mobile.matches("\\d{10}");
     }
 
     private static class BillTotals {
@@ -810,11 +857,8 @@ public class DashboardPanel extends JPanel {
         JButton order=pinkBtn("+ New Purchase"); hdr.add(t,BorderLayout.WEST); hdr.add(order,BorderLayout.EAST);
         p.add(hdr,BorderLayout.NORTH);
 
-        String[] cols={"PO No","Supplier","Items","Amount","Status"};
-        Object[][] rows={{"PO-1024","MediLife Distributors","Dolo 650, Paracetamol","\u20b94,850","Received"},
-                         {"PO-1025","CareWell Pharma","Amoxicillin 500mg","\u20b93,600","Pending"},
-                         {"PO-1026","HealthPlus Supply","Omeprazole 20mg","\u20b92,250","Pending"},
-                         {"PO-1027","Prime Medicals","Metformin 500mg","\u20b98,200","Received"}};
+        String[] cols={"PO No","Supplier","Items","Amount","Status","Date & Time"};
+        Object[][] rows=purchaseRows();
         JTable tbl=simpleTable(cols,rows);
         DefaultTableModel purchaseModel=(DefaultTableModel)tbl.getModel();
 
@@ -822,9 +866,9 @@ public class DashboardPanel extends JPanel {
         JLabel monthValue=new JLabel();
         JLabel supplierValue=new JLabel();
         Runnable updatePurchaseStats=()->{
-            pendingValue.setText(String.valueOf(countPurchaseRowsByStatus(purchaseModel,"Pending")));
-            monthValue.setText("\u20b9"+String.format("%,.0f",sumPurchaseAmounts(purchaseModel)));
-            supplierValue.setText(String.valueOf(countPurchaseSuppliers(purchaseModel)));
+            pendingValue.setText(String.valueOf(DatabaseManager.getPendingPurchaseCount()));
+            monthValue.setText("\u20b9"+String.format("%,.0f",DatabaseManager.getPurchaseTotalThisMonth()));
+            supplierValue.setText(String.valueOf(DatabaseManager.getSupplierCount()));
         };
 
         JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
@@ -835,19 +879,57 @@ public class DashboardPanel extends JPanel {
         p.add(cards,BorderLayout.CENTER);
 
         order.addActionListener(e->{
-            String supplier=JOptionPane.showInputDialog(this,"Supplier name:","New Purchase",JOptionPane.PLAIN_MESSAGE);
-            if(supplier==null||supplier.trim().isEmpty())return;
-            String items=JOptionPane.showInputDialog(this,"Items:","New Purchase",JOptionPane.PLAIN_MESSAGE);
-            if(items==null||items.trim().isEmpty())return;
-            String amount=JOptionPane.showInputDialog(this,"Amount:","New Purchase",JOptionPane.PLAIN_MESSAGE);
-            if(amount==null||amount.trim().isEmpty())return;
-            purchaseModel.addRow(new Object[]{"PO-"+(1024+purchaseModel.getRowCount()+1),supplier.trim(),items.trim(),"\u20b9"+amount.trim(),"Pending"});
+            if(!showPurchaseDialog())return;
+            reloadPurchaseModel(purchaseModel);
             updatePurchaseStats.run();
         });
         JScrollPane sp=new JScrollPane(tbl); sp.setBorder(BorderFactory.createLineBorder(BRD));
         sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
         p.add(sp,BorderLayout.SOUTH);
         return p;
+    }
+
+    private Object[][] purchaseRows() {
+        List<Object[]> purchases=DatabaseManager.getAllPurchases();
+        Object[][] rows=new Object[purchases.size()][];
+        for(int i=0;i<purchases.size();i++) rows[i]=purchases.get(i);
+        return rows;
+    }
+
+    private void reloadPurchaseModel(DefaultTableModel model) {
+        model.setRowCount(0);
+        for(Object[] row:DatabaseManager.getAllPurchases()) model.addRow(row);
+    }
+
+    private boolean showPurchaseDialog() {
+        JPanel form=new JPanel(new GridLayout(4,1,8,8));
+        JTextField supplier=input("");
+        JTextField items=input("");
+        JTextField amount=input("");
+        JComboBox<String> status=new JComboBox<>(new String[]{"Pending","Received"});
+        status.setFont(F13);
+        form.add(labeled("Supplier",supplier));
+        form.add(labeled("Items",items));
+        form.add(labeled("Amount",amount));
+        form.add(labeled("Status",status));
+        int result=JOptionPane.showConfirmDialog(this,form,"New Purchase",JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE);
+        if(result!=JOptionPane.OK_OPTION)return false;
+        String supplierText=supplier.getText().trim();
+        String itemsText=items.getText().trim();
+        if(supplierText.isEmpty()||itemsText.isEmpty()){
+            JOptionPane.showMessageDialog(this,"Supplier and items are required.","Purchase",JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        double amountValue;
+        try{
+            amountValue=Double.parseDouble(amount.getText().replaceAll("[^0-9.]",""));
+            if(amountValue<=0)throw new NumberFormatException();
+        }catch(Exception ex){
+            JOptionPane.showMessageDialog(this,"Enter a valid purchase amount.","Purchase",JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        DatabaseManager.addPurchase(supplierText,itemsText,amountValue,String.valueOf(status.getSelectedItem()));
+        return true;
     }
 
     private int countPurchaseRowsByStatus(DefaultTableModel model,String status) {
@@ -952,6 +1034,36 @@ public class DashboardPanel extends JPanel {
         sp.getViewport().setBackground(WHITE);
         applyTransparentScrollBar(sp);
         JOptionPane.showMessageDialog(this,sp,"Inventory Value",JOptionPane.PLAIN_MESSAGE);
+    }
+
+    JPanel createUsersPage() {
+        JPanel p=new JPanel(new BorderLayout(0,12)); p.setOpaque(false);
+        JLabel t=new JLabel(" Users & Login History"); t.setFont(FB16); t.setForeground(DARK);
+        t.setIcon(qaIcon(0)); t.setIconTextGap(8);
+        p.add(t,BorderLayout.NORTH);
+
+        JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
+        cards.add(coloredSummaryCard("Users",String.valueOf(DatabaseManager.getAllUsers().size()),qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+        cards.add(coloredSummaryCard("Login Records",String.valueOf(DatabaseManager.getLoginHistory().size()),sectionIcon(0),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
+        cards.add(coloredSummaryCard("Default Login","admin / admin123",sectionIcon(2),new Color(0xE8,0xF5,0xE9),GREEN));
+        p.add(cards,BorderLayout.CENTER);
+
+        JPanel tables=new JPanel(new GridLayout(1,2,12,0)); tables.setOpaque(false);
+        JTable users=simpleTable(new String[]{"Username","Role","Created"},listRows(DatabaseManager.getAllUsers()));
+        JTable history=simpleTable(new String[]{"Username","Result","Time"},listRows(DatabaseManager.getLoginHistory()));
+        JScrollPane userSp=new JScrollPane(users); userSp.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(BRD),"Users"));
+        JScrollPane historySp=new JScrollPane(history); historySp.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(BRD),"Recent Logins"));
+        userSp.getViewport().setBackground(WHITE); historySp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(userSp); applyTransparentScrollBar(historySp);
+        tables.add(userSp); tables.add(historySp);
+        p.add(tables,BorderLayout.SOUTH);
+        return p;
+    }
+
+    private Object[][] listRows(List<Object[]> rows) {
+        Object[][] data=new Object[rows.size()][];
+        for(int i=0;i<rows.size();i++) data[i]=rows.get(i);
+        return data;
     }
 
     JPanel createSettingsPage() {
@@ -1105,7 +1217,7 @@ public class DashboardPanel extends JPanel {
             if(stock<lowest){lowest=stock;lowestName=name;}
             if(stock>highest){highest=stock;highestName=name;}
         }
-        JPanel wrap=new JPanel(new GridLayout(1,3,12,0)); wrap.setOpaque(false);
+        JPanel wrap=new JPanel(new GridLayout(1,4,12,0)); wrap.setOpaque(false);
         wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE,150));
         wrap.add(insightPanel("Stock Health",
             new String[]{"In Stock: "+inStock,"Low Stock: "+low,"Critical: "+critical},
@@ -1116,6 +1228,9 @@ public class DashboardPanel extends JPanel {
         wrap.add(insightPanel("Attention",
             new String[]{"Lowest: "+lowestName+" ("+lowest+")","Highest: "+highestName+" ("+highest+")","Top sale: "+DatabaseManager.getTopSellingMedicine()},
             new Color(0xFF,0xF0,0xF5),PINK));
+        wrap.add(insightPanel("Revenue",
+            new String[]{"Today: \u20b9"+String.format("%.2f",DatabaseManager.getRevenueToday()),"This month: \u20b9"+String.format("%.2f",DatabaseManager.getRevenueThisMonth()),"Bills: "+DatabaseManager.getBillCount()},
+            new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
         return wrap;
     }
 
@@ -1589,13 +1704,16 @@ public class DashboardPanel extends JPanel {
         save.addActionListener(e->{
             String nm=nf.getText().trim(),stk=sf.getText().trim(),pr=pf.getText().trim(),exp=ef.getText().trim();
             if(nm.isEmpty()||stk.isEmpty()||pr.isEmpty()||exp.isEmpty()){JOptionPane.showMessageDialog(dlg,"Fill all fields!");return;}
-            int sv;try{sv=Integer.parseInt(stk);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Stock must be number!");return;}
+            int sv;double pv;
+            try{sv=validStock(stk);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Stock must be zero or more!");return;}
+            try{pv=validPrice(pr);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Price must be greater than zero!");return;}
+            if(parseExpiryDate(exp)==null){JOptionPane.showMessageDialog(dlg,"Expiry date must be like MM/YYYY, Jan 2027, or YYYY-MM-DD.");return;}
             Object[] row=new Object[]{
                 sharedTableModel.getValueAt(dataIdx,0),
                 nm,
                 cf.getSelectedItem(),
-                stk,
-                pr,
+                sv,
+                String.format("%.2f",pv),
                 exp,
                 status(sv)
             };

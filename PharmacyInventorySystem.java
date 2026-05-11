@@ -204,6 +204,7 @@ public class PharmacyInventorySystem extends JFrame {
             case 3: contentPanel.add(dashPanel.createPurchasesPage()); break;
             case 4: contentPanel.add(dashPanel.createStockAlertsPage()); break;
             case 5: contentPanel.add(dashPanel.createReportsPage()); break;
+            case 6: contentPanel.add(dashPanel.createUsersPage()); break;
             case 7: contentPanel.add(dashPanel.createSettingsPage()); break;
             default: contentPanel.add(createPlaceholder(navLabels[idx],idx)); break;
         }

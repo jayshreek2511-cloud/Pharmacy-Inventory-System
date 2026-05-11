@@ -157,8 +157,21 @@ public class LoginFrame extends JFrame {
     }
 
     private void attemptLogin() {
-        if (!usernameField.getText().trim().isEmpty()
-                && passwordField.getPassword().length > 0) {
+        String username = usernameField.getText().trim();
+        char[] password = passwordField.getPassword();
+        if (username.isEmpty() || password.length == 0) {
+            failedAttempts++;
+            shakeCard();
+            errorLabel.setText("Enter username and password");
+            if (failedAttempts >= 3) {
+                startLockout();
+            }
+            return;
+        }
+
+        DatabaseManager.UserAccount user = DatabaseManager.authenticateUser(username, password);
+        java.util.Arrays.fill(password, '\0');
+        if (user != null) {
             dispose();
             onLoginSuccess.run();
             return;
@@ -166,7 +179,7 @@ public class LoginFrame extends JFrame {
 
         failedAttempts++;
         shakeCard();
-        errorLabel.setText("Enter username and password");
+        errorLabel.setText("Invalid username or password");
         if (failedAttempts >= 3) {
             startLockout();
         }

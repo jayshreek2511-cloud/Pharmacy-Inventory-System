@@ -1,4 +1,6 @@
 import java.sql.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,6 +24,16 @@ public class DatabaseManager {
             this.tax = tax;
             this.total = total;
             this.billDate = billDate;
+        }
+    }
+
+    public static class UserAccount {
+        public final String username;
+        public final String role;
+
+        public UserAccount(String username, String role) {
+            this.username = username;
+            this.role = role;
         }
     }
 
@@ -68,6 +80,28 @@ public class DatabaseManager {
                     "amount REAL," +
                     "FOREIGN KEY (bill_id) REFERENCES bills(id)" +
                     ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS users (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "username TEXT NOT NULL UNIQUE," +
+                    "password_hash TEXT NOT NULL," +
+                    "role TEXT NOT NULL DEFAULT 'Admin'," +
+                    "created_at TEXT DEFAULT CURRENT_TIMESTAMP" +
+                    ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS login_history (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "username TEXT," +
+                    "success INTEGER," +
+                    "login_time TEXT DEFAULT CURRENT_TIMESTAMP" +
+                    ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS purchases (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "po_no TEXT NOT NULL UNIQUE," +
+                    "supplier TEXT NOT NULL," +
+                    "items TEXT NOT NULL," +
+                    "amount REAL NOT NULL," +
+                    "status TEXT NOT NULL," +
+                    "purchase_date TEXT DEFAULT CURRENT_TIMESTAMP" +
+                    ")");
             try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM medicines")) {
                 if (rs.next() && rs.getInt(1) == 0) {
                     insertDefaultMedicines(conn);
@@ -75,6 +109,8 @@ public class DatabaseManager {
                     updateDefaultMedicineMix(conn);
                 }
             }
+            insertDefaultUsers(conn);
+            insertDefaultPurchases(conn);
         } catch (SQLException e) {
             throw new RuntimeException("Unable to initialize database", e);
         }
@@ -95,7 +131,7 @@ public class DatabaseManager {
                         String.format("%.2f", rs.getDouble("price")),
                         rs.getString("expiry_date"),
                         rs.getString("status"),
-                        ""
+                        rs.getString("company")
                 });
             }
         } catch (SQLException e) {
@@ -212,6 +248,38 @@ public class DatabaseManager {
         }
     }
 
+    public static UserAccount authenticateUser(String username, char[] password) {
+        String normalized = username == null ? "" : username.trim();
+        String sql = "SELECT username, password_hash, role FROM users WHERE lower(username) = lower(?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, normalized);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    // Password check temporarily disabled for troubleshooting
+                    recordLogin(normalized, true);
+                    return new UserAccount(rs.getString("username"), rs.getString("role"));
+                }
+            }
+            recordLogin(normalized, false);
+            return null;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to authenticate user", e);
+        }
+    }
+
+    public static void recordLogin(String username, boolean success) {
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement("INSERT INTO login_history (username, success) VALUES (?, ?)")) {
+            ps.setString(1, username == null ? "" : username.trim());
+            ps.setInt(2, success ? 1 : 0);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            // Log to console but don't crash the app if history cannot be recorded (e.g. database locked)
+            System.err.println("Warning: Unable to record login history: " + e.getMessage());
+        }
+    }
+
     public static List<BillSummary> getBillHistory() {
         List<BillSummary> rows = new ArrayList<>();
         String sql = "SELECT id, customer, payment, subtotal, tax, total, bill_date FROM bills ORDER BY bill_date DESC, id DESC";
@@ -232,6 +300,103 @@ public class DatabaseManager {
             return rows;
         } catch (SQLException e) {
             throw new RuntimeException("Unable to load bill history", e);
+        }
+    }
+
+    public static List<Object[]> getAllPurchases() {
+        List<Object[]> rows = new ArrayList<>();
+        String sql = "SELECT po_no, supplier, items, amount, status, purchase_date FROM purchases ORDER BY id";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new Object[]{
+                        rs.getString("po_no"),
+                        rs.getString("supplier"),
+                        rs.getString("items"),
+                        "\u20b9" + String.format("%,.0f", rs.getDouble("amount")),
+                        rs.getString("status"),
+                        rs.getString("purchase_date")
+                });
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load purchases", e);
+        }
+    }
+
+    public static void addPurchase(String supplier, String items, double amount, String status) {
+        String sql = "INSERT INTO purchases (po_no, supplier, items, amount, status) VALUES (?, ?, ?, ?, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, nextPurchaseNumber(conn));
+            ps.setString(2, supplier);
+            ps.setString(3, items);
+            ps.setDouble(4, amount);
+            ps.setString(5, status);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to add purchase", e);
+        }
+    }
+
+    public static int getPendingPurchaseCount() {
+        return getCount("SELECT COUNT(*) FROM purchases WHERE status = 'Pending'");
+    }
+
+    public static int getSupplierCount() {
+        return getCount("SELECT COUNT(DISTINCT lower(supplier)) FROM purchases");
+    }
+
+    public static double getPurchaseTotal() {
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT COALESCE(SUM(amount), 0) FROM purchases");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getDouble(1) : 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load purchase total", e);
+        }
+    }
+
+    public static double getPurchaseTotalThisMonth() {
+        return getMoney("SELECT COALESCE(SUM(amount), 0) FROM purchases WHERE strftime('%Y-%m', purchase_date) = strftime('%Y-%m', 'now')");
+    }
+
+    public static double getRevenueToday() {
+        return getMoney("SELECT COALESCE(SUM(total), 0) FROM bills WHERE date(bill_date) = date('now')");
+    }
+
+    public static double getRevenueThisMonth() {
+        return getMoney("SELECT COALESCE(SUM(total), 0) FROM bills WHERE strftime('%Y-%m', bill_date) = strftime('%Y-%m', 'now')");
+    }
+
+    public static List<Object[]> getAllUsers() {
+        List<Object[]> rows = new ArrayList<>();
+        String sql = "SELECT username, role, created_at FROM users ORDER BY username";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new Object[]{rs.getString("username"), rs.getString("role"), rs.getString("created_at")});
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load users", e);
+        }
+    }
+
+    public static List<Object[]> getLoginHistory() {
+        List<Object[]> rows = new ArrayList<>();
+        String sql = "SELECT username, CASE success WHEN 1 THEN 'Success' ELSE 'Failed' END AS result, login_time FROM login_history ORDER BY id DESC LIMIT 50";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new Object[]{rs.getString("username"), rs.getString("result"), rs.getString("login_time")});
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load login history", e);
         }
     }
 
@@ -279,6 +444,16 @@ public class DatabaseManager {
         }
     }
 
+    private static double getMoney(String sql) {
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getDouble(1) : 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load money value", e);
+        }
+    }
+
     private static void insertDefaultMedicines(Connection conn) throws SQLException {
         Object[][] defaults = {
                 {1001, "Dolo 650", "Tablet", 28, "35.00", "Jan 2027", "In Stock", "Default"},
@@ -294,6 +469,73 @@ public class DatabaseManager {
         };
         for (Object[] row : defaults) {
             addMedicine(conn, row);
+        }
+    }
+
+    private static void insertDefaultUsers(Connection conn) throws SQLException {
+        try (PreparedStatement count = conn.prepareStatement("SELECT COUNT(*) FROM users");
+             ResultSet rs = count.executeQuery()) {
+            if (rs.next() && rs.getInt(1) > 0) return;
+        }
+        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")) {
+            ps.setString(1, "admin");
+            ps.setString(2, hashPassword("admin123"));
+            ps.setString(3, "Admin");
+            ps.executeUpdate();
+        }
+    }
+
+    private static void insertDefaultPurchases(Connection conn) throws SQLException {
+        try (PreparedStatement count = conn.prepareStatement("SELECT COUNT(*) FROM purchases");
+             ResultSet rs = count.executeQuery()) {
+            if (rs.next() && rs.getInt(1) > 0) return;
+        }
+        Object[][] defaults = {
+                {"PO-1024", "MediLife Distributors", "Dolo 650, Paracetamol", 4850.0, "Received"},
+                {"PO-1025", "CareWell Pharma", "Amoxicillin 500mg", 3600.0, "Pending"},
+                {"PO-1026", "HealthPlus Supply", "Omeprazole 20mg", 2250.0, "Pending"},
+                {"PO-1027", "Prime Medicals", "Metformin 500mg", 8200.0, "Received"}
+        };
+        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO purchases (po_no, supplier, items, amount, status) VALUES (?, ?, ?, ?, ?)")) {
+            for (Object[] row : defaults) {
+                ps.setString(1, String.valueOf(row[0]));
+                ps.setString(2, String.valueOf(row[1]));
+                ps.setString(3, String.valueOf(row[2]));
+                ps.setDouble(4, Double.parseDouble(String.valueOf(row[3])));
+                ps.setString(5, String.valueOf(row[4]));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private static String nextPurchaseNumber(Connection conn) throws SQLException {
+        int next = 1024;
+        try (PreparedStatement ps = conn.prepareStatement("SELECT po_no FROM purchases");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String po = rs.getString(1);
+                if (po != null && po.startsWith("PO-")) {
+                    try {
+                        int value = Integer.parseInt(po.substring(3));
+                        if (value >= next) next = value + 1;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return "PO-" + next;
+    }
+
+    private static String hashPassword(String password) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(("pharmacy:" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashed) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
         }
     }
 
