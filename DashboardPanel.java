@@ -11,9 +11,14 @@ import java.awt.geom.*;
 import java.awt.print.*;
 import java.io.*;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Vector;
 
 public class DashboardPanel extends JPanel {
@@ -122,11 +127,21 @@ public class DashboardPanel extends JPanel {
         row.setPreferredSize(new Dimension(0,130));
         row.setMinimumSize(new Dimension(0,120));
         totalLbl=new JLabel(String.valueOf(sharedTableModel.getRowCount()));
-        expLbl=new JLabel("5"); lowLbl=new JLabel("8"); revLbl=new JLabel("₹"+String.format("%.2f",DatabaseManager.getTotalRevenue()));
-        row.add(statCard(statIcon(0,new Color(0xFF,0x98,0x00)),"Total Medicines",totalLbl,new Color(0xFF,0x98,0x00),"All medicines in stock",new Color(0x4C,0xAF,0x50),CARD1_BG));
-        row.add(statCard(statIcon(1,new Color(0xFF,0xB3,0x00)),"Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Within next 30 days",new Color(0xFF,0x98,0x00),CARD2_BG));
-        row.add(statCard(statIcon(2,new Color(0x7B,0x1F,0xA2)),"Low Stock",lowLbl,new Color(0x7B,0x1F,0xA2),"Stock below minimum",new Color(0x9E,0x9E,0x9E),CARD3_BG));
-        row.add(statCard(statIcon(3,GREEN),"Total Revenue",revLbl,GREEN,"This Month",new Color(0x4C,0xAF,0x50),CARD4_BG));
+        expLbl=new JLabel(String.valueOf(getExpiringSoonRows().size()));
+        lowLbl=new JLabel(String.valueOf(getLowStockRows().size()));
+        revLbl=new JLabel("\u20b9"+String.format("%.2f",DatabaseManager.getTotalRevenue()));
+        JPanel totalCard=statCard(statIcon(0,new Color(0xFF,0x98,0x00)),"Total Medicines",totalLbl,new Color(0xFF,0x98,0x00),"All medicines in stock",new Color(0x4C,0xAF,0x50),CARD1_BG);
+        makeClickable(totalCard,()->navigateTo(1));
+        row.add(totalCard);
+        JPanel expCard=statCard(statIcon(1,new Color(0xFF,0xB3,0x00)),"Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Within next 30 days",new Color(0xFF,0x98,0x00),CARD2_BG);
+        makeClickable(expCard,()->showMedicineList("Expiring Soon",getExpiringSoonRows()));
+        row.add(expCard);
+        JPanel lowCard=statCard(statIcon(2,new Color(0x7B,0x1F,0xA2)),"Low Stock",lowLbl,new Color(0x7B,0x1F,0xA2),"Stock below minimum",new Color(0x9E,0x9E,0x9E),CARD3_BG);
+        makeClickable(lowCard,()->showMedicineList("Low Stock Medicines",getLowStockRows()));
+        row.add(lowCard);
+        JPanel revenueCard=statCard(statIcon(3,GREEN),"Total Revenue",revLbl,GREEN,"This Month",new Color(0x4C,0xAF,0x50),CARD4_BG);
+        makeClickable(revenueCard,this::showRevenueHistory);
+        row.add(revenueCard);
         return row;
     }
 
@@ -366,8 +381,104 @@ public class DashboardPanel extends JPanel {
 
     void updateStats(){
         totalLbl.setText(String.valueOf(sharedTableModel.getRowCount()));
-        if(revLbl!=null)revLbl.setText("₹"+String.format("%.2f",DatabaseManager.getTotalRevenue()));
+        if(expLbl!=null)expLbl.setText(String.valueOf(getExpiringSoonRows().size()));
+        if(lowLbl!=null)lowLbl.setText(String.valueOf(getLowStockRows().size()));
+        if(revLbl!=null)revLbl.setText("\u20b9"+String.format("%.2f",DatabaseManager.getTotalRevenue()));
         if(stockChartPanel!=null)stockChartPanel.refreshData();
+    }
+
+    private void makeClickable(JComponent component,Runnable action) {
+        component.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        component.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){action.run();}
+        });
+    }
+
+    private List<Object[]> getLowStockRows() {
+        List<Object[]> rows=new ArrayList<>();
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            String st=String.valueOf(sharedTableModel.getValueAt(i,6));
+            if("Low Stock".equals(st)||"Critical".equals(st)) rows.add(medicineDialogRow(i));
+        }
+        return rows;
+    }
+
+    private List<Object[]> getExpiringSoonRows() {
+        List<Object[]> rows=new ArrayList<>();
+        LocalDate today=LocalDate.now();
+        LocalDate limit=today.plusDays(30);
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            LocalDate expiry=parseExpiryDate(String.valueOf(sharedTableModel.getValueAt(i,5)));
+            if(expiry!=null&&!expiry.isBefore(today)&&!expiry.isAfter(limit)) rows.add(medicineDialogRow(i));
+        }
+        return rows;
+    }
+
+    private Object[] medicineDialogRow(int row) {
+        return new Object[]{
+            sharedTableModel.getValueAt(row,0),
+            sharedTableModel.getValueAt(row,1),
+            sharedTableModel.getValueAt(row,2),
+            sharedTableModel.getValueAt(row,3),
+            sharedTableModel.getValueAt(row,4),
+            sharedTableModel.getValueAt(row,5),
+            sharedTableModel.getValueAt(row,6)
+        };
+    }
+
+    private LocalDate parseExpiryDate(String text) {
+        String value=text.trim();
+        DateTimeFormatter monthName=DateTimeFormatter.ofPattern("MMM yyyy",Locale.ENGLISH);
+        DateTimeFormatter monthNumber=DateTimeFormatter.ofPattern("MM/yyyy",Locale.ENGLISH);
+        try{return YearMonth.parse(value,monthName).atEndOfMonth();}catch(DateTimeParseException ignored){}
+        try{return YearMonth.parse(value,monthNumber).atEndOfMonth();}catch(DateTimeParseException ignored){}
+        try{return LocalDate.parse(value);}catch(DateTimeParseException ignored){}
+        return null;
+    }
+
+    private void showMedicineList(String title,List<Object[]> rows) {
+        String[] columns={"ID","Medicine","Category","Stock","Price","Expiry","Status"};
+        Object[][] data=rows.toArray(new Object[0][]);
+        JTable table=simpleTable(columns,data);
+        JScrollPane sp=new JScrollPane(table);
+        sp.setPreferredSize(new Dimension(760,320));
+        sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(sp);
+        if(rows.isEmpty()){
+            JOptionPane.showMessageDialog(this,"No medicines found for this list.",title,JOptionPane.INFORMATION_MESSAGE);
+        }else{
+            JOptionPane.showMessageDialog(this,sp,title,JOptionPane.PLAIN_MESSAGE);
+        }
+    }
+
+    private void showRevenueHistory() {
+        List<DatabaseManager.BillSummary> bills=DatabaseManager.getBillHistory();
+        String[] columns={"Bill No","Customer","Payment","Subtotal","Tax","Total","Date & Time"};
+        Object[][] data=new Object[bills.size()][columns.length];
+        for(int i=0;i<bills.size();i++){
+            DatabaseManager.BillSummary bill=bills.get(i);
+            data[i]=new Object[]{
+                "#"+bill.id,
+                bill.customer,
+                bill.payment,
+                "\u20b9"+String.format("%.2f",bill.subtotal),
+                "\u20b9"+String.format("%.2f",bill.tax),
+                "\u20b9"+String.format("%.2f",bill.total),
+                bill.billDate
+            };
+        }
+        JTable table=simpleTable(columns,data);
+        JScrollPane sp=new JScrollPane(table);
+        sp.setPreferredSize(new Dimension(820,340));
+        sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(sp);
+        if(bills.isEmpty()){
+            JOptionPane.showMessageDialog(this,"No revenue history yet. Generate a bill to create the first entry.","Revenue History",JOptionPane.INFORMATION_MESSAGE);
+        }else{
+            JOptionPane.showMessageDialog(this,sp,"Revenue History",JOptionPane.PLAIN_MESSAGE);
+        }
     }
 
     private JPanel buildRightPanel() {
@@ -699,19 +810,30 @@ public class DashboardPanel extends JPanel {
         JButton order=pinkBtn("+ New Purchase"); hdr.add(t,BorderLayout.WEST); hdr.add(order,BorderLayout.EAST);
         p.add(hdr,BorderLayout.NORTH);
 
-        JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
-        cards.add(coloredSummaryCard("Pending Orders","4",sectionIcon(2),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
-        cards.add(coloredSummaryCard("This Month","â‚¹18,900",statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
-        cards.add(coloredSummaryCard("Suppliers","6",qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
-        p.add(cards,BorderLayout.CENTER);
-
         String[] cols={"PO No","Supplier","Items","Amount","Status"};
-        Object[][] rows={{"PO-1024","MediLife Distributors","Dolo 650, Paracetamol","â‚¹4,850","Received"},
-                         {"PO-1025","CareWell Pharma","Amoxicillin 500mg","â‚¹3,600","Pending"},
-                         {"PO-1026","HealthPlus Supply","Omeprazole 20mg","â‚¹2,250","Pending"},
-                         {"PO-1027","Prime Medicals","Metformin 500mg","â‚¹8,200","Received"}};
+        Object[][] rows={{"PO-1024","MediLife Distributors","Dolo 650, Paracetamol","\u20b94,850","Received"},
+                         {"PO-1025","CareWell Pharma","Amoxicillin 500mg","\u20b93,600","Pending"},
+                         {"PO-1026","HealthPlus Supply","Omeprazole 20mg","\u20b92,250","Pending"},
+                         {"PO-1027","Prime Medicals","Metformin 500mg","\u20b98,200","Received"}};
         JTable tbl=simpleTable(cols,rows);
         DefaultTableModel purchaseModel=(DefaultTableModel)tbl.getModel();
+
+        JLabel pendingValue=new JLabel();
+        JLabel monthValue=new JLabel();
+        JLabel supplierValue=new JLabel();
+        Runnable updatePurchaseStats=()->{
+            pendingValue.setText(String.valueOf(countPurchaseRowsByStatus(purchaseModel,"Pending")));
+            monthValue.setText("\u20b9"+String.format("%,.0f",sumPurchaseAmounts(purchaseModel)));
+            supplierValue.setText(String.valueOf(countPurchaseSuppliers(purchaseModel)));
+        };
+
+        JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
+        cards.add(totalCard("Pending Orders",pendingValue,sectionIcon(2),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
+        cards.add(totalCard("This Month",monthValue,statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
+        cards.add(totalCard("Suppliers",supplierValue,qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+        updatePurchaseStats.run();
+        p.add(cards,BorderLayout.CENTER);
+
         order.addActionListener(e->{
             String supplier=JOptionPane.showInputDialog(this,"Supplier name:","New Purchase",JOptionPane.PLAIN_MESSAGE);
             if(supplier==null||supplier.trim().isEmpty())return;
@@ -719,12 +841,42 @@ public class DashboardPanel extends JPanel {
             if(items==null||items.trim().isEmpty())return;
             String amount=JOptionPane.showInputDialog(this,"Amount:","New Purchase",JOptionPane.PLAIN_MESSAGE);
             if(amount==null||amount.trim().isEmpty())return;
-            purchaseModel.addRow(new Object[]{"PO-"+(1024+purchaseModel.getRowCount()+1),supplier.trim(),items.trim(),"â‚¹"+amount.trim(),"Pending"});
+            purchaseModel.addRow(new Object[]{"PO-"+(1024+purchaseModel.getRowCount()+1),supplier.trim(),items.trim(),"\u20b9"+amount.trim(),"Pending"});
+            updatePurchaseStats.run();
         });
         JScrollPane sp=new JScrollPane(tbl); sp.setBorder(BorderFactory.createLineBorder(BRD));
         sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
         p.add(sp,BorderLayout.SOUTH);
         return p;
+    }
+
+    private int countPurchaseRowsByStatus(DefaultTableModel model,String status) {
+        int count=0;
+        for(int i=0;i<model.getRowCount();i++){
+            if(status.equals(String.valueOf(model.getValueAt(i,4)))) count++;
+        }
+        return count;
+    }
+
+    private int countPurchaseSuppliers(DefaultTableModel model) {
+        java.util.Set<String> suppliers=new java.util.HashSet<>();
+        for(int i=0;i<model.getRowCount();i++){
+            String supplier=String.valueOf(model.getValueAt(i,1)).trim();
+            if(!supplier.isEmpty()) suppliers.add(supplier.toLowerCase(Locale.ENGLISH));
+        }
+        return suppliers.size();
+    }
+
+    private double sumPurchaseAmounts(DefaultTableModel model) {
+        double total=0;
+        for(int i=0;i<model.getRowCount();i++) total+=parsePurchaseAmount(model.getValueAt(i,3));
+        return total;
+    }
+
+    private double parsePurchaseAmount(Object value) {
+        String amount=String.valueOf(value).replaceAll("[^0-9.]","");
+        if(amount.isEmpty()) return 0;
+        try{return Double.parseDouble(amount);}catch(NumberFormatException ex){return 0;}
     }
 
     JPanel createReportsPage() {
@@ -734,21 +886,21 @@ public class DashboardPanel extends JPanel {
         p.add(t,BorderLayout.NORTH);
 
         JPanel cards=new JPanel(new GridLayout(1,4,12,0)); cards.setOpaque(false);
-        cards.add(coloredSummaryCard("Inventory Value","₹"+String.format("%.2f",DatabaseManager.getInventoryValue()),statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN));
-        cards.add(coloredSummaryCard("Low Stock",String.valueOf(DatabaseManager.getLowStockCount()),sectionIcon(1),new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00)));
-        cards.add(coloredSummaryCard("Critical",String.valueOf(DatabaseManager.getCriticalStockCount()),sectionIcon(2),new Color(0xFF,0xEB,0xEE),RED));
-        cards.add(coloredSummaryCard("Revenue","₹"+String.format("%.2f",DatabaseManager.getTotalRevenue()),sectionIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+        JPanel inventoryCard=coloredSummaryCard("Inventory Value","\u20b9"+String.format("%.2f",DatabaseManager.getInventoryValue()),statIcon(3,GREEN),new Color(0xE8,0xF5,0xE9),GREEN);
+        makeClickable(inventoryCard,()->showInventoryValueList());
+        cards.add(inventoryCard);
+        JPanel lowStockCard=coloredSummaryCard("Low Stock",String.valueOf(DatabaseManager.getLowStockCount()),sectionIcon(1),new Color(0xFF,0xF7,0xE8),new Color(0xE6,0x51,0x00));
+        makeClickable(lowStockCard,()->showMedicineList("Low Stock Medicines",getLowStockOnlyRows()));
+        cards.add(lowStockCard);
+        JPanel criticalCard=coloredSummaryCard("Critical",String.valueOf(DatabaseManager.getCriticalStockCount()),sectionIcon(2),new Color(0xFF,0xEB,0xEE),RED);
+        makeClickable(criticalCard,()->showMedicineList("Critical Stock Medicines",getCriticalStockRows()));
+        cards.add(criticalCard);
+        JPanel revenueCard=coloredSummaryCard("Revenue","\u20b9"+String.format("%.2f",DatabaseManager.getTotalRevenue()),sectionIcon(0),new Color(0xFF,0xF0,0xF5),PINK);
+        makeClickable(revenueCard,this::showRevenueHistory);
+        cards.add(revenueCard);
 
         String[] cols={"Medicine","Stock","Value","Status"};
-        Object[][] rows=new Object[sharedTableModel.getRowCount()][4];
-        for(int i=0;i<sharedTableModel.getRowCount();i++){
-            int stock=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,3)));
-            double price=Double.parseDouble(String.valueOf(sharedTableModel.getValueAt(i,4)));
-            rows[i][0]=sharedTableModel.getValueAt(i,1);
-            rows[i][1]=stock;
-            rows[i][2]="₹"+String.format("%.2f",stock*price);
-            rows[i][3]=sharedTableModel.getValueAt(i,6);
-        }
+        Object[][] rows=getInventoryValueRows();
         JPanel center=new JPanel(); center.setOpaque(false);
         center.setLayout(new BoxLayout(center,BoxLayout.Y_AXIS));
         cards.setMaximumSize(new Dimension(Integer.MAX_VALUE,92));
@@ -761,6 +913,45 @@ public class DashboardPanel extends JPanel {
         sp.getViewport().setBackground(WHITE); applyTransparentScrollBar(sp);
         p.add(sp,BorderLayout.SOUTH);
         return p;
+    }
+
+    private List<Object[]> getLowStockOnlyRows() {
+        List<Object[]> rows=new ArrayList<>();
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            if("Low Stock".equals(String.valueOf(sharedTableModel.getValueAt(i,6)))) rows.add(medicineDialogRow(i));
+        }
+        return rows;
+    }
+
+    private List<Object[]> getCriticalStockRows() {
+        List<Object[]> rows=new ArrayList<>();
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            if("Critical".equals(String.valueOf(sharedTableModel.getValueAt(i,6)))) rows.add(medicineDialogRow(i));
+        }
+        return rows;
+    }
+
+    private Object[][] getInventoryValueRows() {
+        Object[][] rows=new Object[sharedTableModel.getRowCount()][4];
+        for(int i=0;i<sharedTableModel.getRowCount();i++){
+            int stock=Integer.parseInt(String.valueOf(sharedTableModel.getValueAt(i,3)));
+            double price=Double.parseDouble(String.valueOf(sharedTableModel.getValueAt(i,4)));
+            rows[i][0]=sharedTableModel.getValueAt(i,1);
+            rows[i][1]=stock;
+            rows[i][2]="\u20b9"+String.format("%.2f",stock*price);
+            rows[i][3]=sharedTableModel.getValueAt(i,6);
+        }
+        return rows;
+    }
+
+    private void showInventoryValueList() {
+        JTable table=simpleTable(new String[]{"Medicine","Stock","Value","Status"},getInventoryValueRows());
+        JScrollPane sp=new JScrollPane(table);
+        sp.setPreferredSize(new Dimension(760,320));
+        sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(sp);
+        JOptionPane.showMessageDialog(this,sp,"Inventory Value",JOptionPane.PLAIN_MESSAGE);
     }
 
     JPanel createSettingsPage() {
@@ -1410,7 +1601,7 @@ public class DashboardPanel extends JPanel {
             };
             DatabaseManager.updateMedicine(row);
             loadMedicinesFromDatabase();
-            refreshTable();dlg.dispose();JOptionPane.showMessageDialog(this,"Medicine updated!");
+            refreshTable();updateStats();dlg.dispose();JOptionPane.showMessageDialog(this,"Medicine updated!");
         });
         btns.add(cancel);btns.add(save);p.add(btns);
         dlg.setContentPane(p);dlg.setVisible(true);

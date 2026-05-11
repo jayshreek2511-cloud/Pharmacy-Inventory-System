@@ -5,6 +5,26 @@ import java.util.List;
 public class DatabaseManager {
     private static final String DB_URL = "jdbc:sqlite:pharmacy.db";
 
+    public static class BillSummary {
+        public final int id;
+        public final String customer;
+        public final String payment;
+        public final double subtotal;
+        public final double tax;
+        public final double total;
+        public final String billDate;
+
+        public BillSummary(int id, String customer, String payment, double subtotal, double tax, double total, String billDate) {
+            this.id = id;
+            this.customer = customer;
+            this.payment = payment;
+            this.subtotal = subtotal;
+            this.tax = tax;
+            this.total = total;
+            this.billDate = billDate;
+        }
+    }
+
     public static Connection getConnection() throws SQLException {
         try {
             Class.forName("org.sqlite.JDBC");
@@ -189,6 +209,29 @@ public class DatabaseManager {
             return rs.next() ? rs.getInt(1) : 0;
         } catch (SQLException e) {
             throw new RuntimeException("Unable to load bill count", e);
+        }
+    }
+
+    public static List<BillSummary> getBillHistory() {
+        List<BillSummary> rows = new ArrayList<>();
+        String sql = "SELECT id, customer, payment, subtotal, tax, total, bill_date FROM bills ORDER BY bill_date DESC, id DESC";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new BillSummary(
+                        rs.getInt("id"),
+                        rs.getString("customer"),
+                        rs.getString("payment"),
+                        rs.getDouble("subtotal"),
+                        rs.getDouble("tax"),
+                        rs.getDouble("total"),
+                        rs.getString("bill_date")
+                ));
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load bill history", e);
         }
     }
 
