@@ -16,6 +16,7 @@ A beautiful Java Swing desktop application for pharmacy inventory management wit
 
 ## 🚀 How to Run
 1. ☕ Install JDK 11 or higher.
+   Quick command (Windows): `winget install Microsoft.OpenJDK.11`
 2. 📁 Open a terminal in this project folder.
 3. 🛠️ Compile:
    ```bash
