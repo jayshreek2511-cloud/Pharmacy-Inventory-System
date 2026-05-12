@@ -1,11 +1,14 @@
 import java.sql.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
 public class DatabaseManager {
     private static final String DB_URL = "jdbc:sqlite:pharmacy.db";
+    private static final DateTimeFormatter DB_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public static class BillSummary {
         public final int id;
@@ -102,6 +105,17 @@ public class DatabaseManager {
                     "status TEXT NOT NULL," +
                     "purchase_date TEXT DEFAULT CURRENT_TIMESTAMP" +
                     ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS expired_medicines (" +
+                    "id INTEGER PRIMARY KEY," +
+                    "name TEXT NOT NULL," +
+                    "category TEXT," +
+                    "stock INTEGER," +
+                    "price REAL," +
+                    "expiry_date TEXT," +
+                    "status TEXT," +
+                    "company TEXT," +
+                    "expired_on TEXT DEFAULT CURRENT_TIMESTAMP" +
+                    ")");
             try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM medicines")) {
                 if (rs.next() && rs.getInt(1) == 0) {
                     insertDefaultMedicines(conn);
@@ -136,6 +150,29 @@ public class DatabaseManager {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Unable to load medicines", e);
+        }
+        return rows;
+    }
+
+    public static List<Object[]> getExpiredMedicines() {
+        List<Object[]> rows = new ArrayList<>();
+        String sql = "SELECT id, name, category, stock, price, expiry_date, status FROM expired_medicines ORDER BY expired_on DESC, id";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new Object[]{
+                        rs.getInt("id"),
+                        rs.getString("name"),
+                        rs.getString("category"),
+                        rs.getInt("stock"),
+                        String.format("%.2f", rs.getDouble("price")),
+                        rs.getString("expiry_date"),
+                        rs.getString("status")
+                });
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to load expired medicines", e);
         }
         return rows;
     }
@@ -182,6 +219,31 @@ public class DatabaseManager {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Unable to delete medicine", e);
+        }
+    }
+
+    public static void archiveExpiredMedicine(int id) {
+        String insertSql = "INSERT OR REPLACE INTO expired_medicines " +
+                "(id, name, category, stock, price, expiry_date, status, company, expired_on) " +
+                "SELECT id, name, category, stock, price, expiry_date, 'Expired', company, CURRENT_TIMESTAMP " +
+                "FROM medicines WHERE id = ?";
+        try (Connection conn = getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement insert = conn.prepareStatement(insertSql);
+                 PreparedStatement delete = conn.prepareStatement("DELETE FROM medicines WHERE id = ?")) {
+                insert.setInt(1, id);
+                insert.executeUpdate();
+                delete.setInt(1, id);
+                delete.executeUpdate();
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to archive expired medicine", e);
         }
     }
 
@@ -256,9 +318,9 @@ public class DatabaseManager {
             ps.setString(1, normalized);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    // Password check temporarily disabled for troubleshooting
-                    recordLogin(normalized, true);
-                    return new UserAccount(rs.getString("username"), rs.getString("role"));
+                    boolean matches = hashPassword(new String(password)).equals(rs.getString("password_hash"));
+                    recordLogin(normalized, matches);
+                    return matches ? new UserAccount(rs.getString("username"), rs.getString("role")) : null;
                 }
             }
             recordLogin(normalized, false);
@@ -270,13 +332,43 @@ public class DatabaseManager {
 
     public static void recordLogin(String username, boolean success) {
         try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement("INSERT INTO login_history (username, success) VALUES (?, ?)")) {
+             PreparedStatement ps = conn.prepareStatement("INSERT INTO login_history (username, success, login_time) VALUES (?, ?, ?)")) {
             ps.setString(1, username == null ? "" : username.trim());
             ps.setInt(2, success ? 1 : 0);
+            ps.setString(3, nowText());
             ps.executeUpdate();
         } catch (SQLException e) {
             // Log to console but don't crash the app if history cannot be recorded (e.g. database locked)
             System.err.println("Warning: Unable to record login history: " + e.getMessage());
+        }
+    }
+
+    public static void addUser(String username, String password, String role) {
+        String normalized = username == null ? "" : username.trim();
+        String selectedRole = role == null || role.trim().isEmpty() ? "Staff" : role.trim();
+        String sql = "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, normalized);
+            ps.setString(2, hashPassword(password));
+            ps.setString(3, selectedRole);
+            ps.setString(4, nowText());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to add user", e);
+        }
+    }
+
+    public static boolean userExists(String username) {
+        String normalized = username == null ? "" : username.trim();
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM users WHERE lower(username) = lower(?)")) {
+            ps.setString(1, normalized);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Unable to check user", e);
         }
     }
 
@@ -477,12 +569,17 @@ public class DatabaseManager {
              ResultSet rs = count.executeQuery()) {
             if (rs.next() && rs.getInt(1) > 0) return;
         }
-        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")) {
+        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)")) {
             ps.setString(1, "admin");
             ps.setString(2, hashPassword("admin123"));
             ps.setString(3, "Admin");
+            ps.setString(4, nowText());
             ps.executeUpdate();
         }
+    }
+
+    private static String nowText() {
+        return LocalDateTime.now().format(DB_TIME_FORMAT);
     }
 
     private static void insertDefaultPurchases(Connection conn) throws SQLException {

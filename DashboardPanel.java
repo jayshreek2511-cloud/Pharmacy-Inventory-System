@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -49,6 +50,7 @@ public class DashboardPanel extends JPanel {
     private JPanel pagPanel;
     private StockOverviewPanel stockChartPanel;
     private java.util.function.IntConsumer navigator;
+    private Timer expirySweepTimer;
     static final int RPP=5;
     private String[] cols={"ID","Medicine Name","Category","Stock","Price (\u20b9)","Expiry Date","Status","Action"};
 
@@ -63,6 +65,7 @@ public class DashboardPanel extends JPanel {
     }
 
     private static void loadMedicinesFromDatabase() {
+        archiveExpiredMedicines();
         Vector<Vector> data = sharedTableModel.getDataVector();
         data.clear();
         for(Object[] row:DatabaseManager.getAllMedicines()){
@@ -73,10 +76,20 @@ public class DashboardPanel extends JPanel {
         sharedTableModel.fireTableDataChanged();
     }
 
+    private static void archiveExpiredMedicines() {
+        for(Object[] row:DatabaseManager.getAllMedicines()){
+            LocalDate expiry=parseExpiryDate(String.valueOf(row[5]));
+            if(expiry!=null&&expiry.isBefore(LocalDate.now())){
+                DatabaseManager.archiveExpiredMedicine(Integer.parseInt(String.valueOf(row[0])));
+            }
+        }
+    }
+
     public DashboardPanel() {
         setLayout(new BorderLayout()); setOpaque(false);
         initializeSharedTable();
         initModel();
+        startExpirySweepTimer();
         JPanel top=new JPanel(new BorderLayout()); top.setOpaque(false);
         top.add(buildDashboardSummary(),BorderLayout.NORTH);
         JPanel mid=new JPanel(new BorderLayout(16,0)); mid.setOpaque(false);
@@ -85,6 +98,15 @@ public class DashboardPanel extends JPanel {
         mid.add(buildRightPanel(),BorderLayout.EAST);
         top.add(mid,BorderLayout.CENTER);
         add(top,BorderLayout.CENTER);
+    }
+
+    private void startExpirySweepTimer() {
+        expirySweepTimer=new Timer(60*60*1000,e->{
+            loadMedicinesFromDatabase();
+            refreshTable();
+            updateStats();
+        });
+        expirySweepTimer.start();
     }
 
     void setNavigator(java.util.function.IntConsumer navigator) {
@@ -133,8 +155,8 @@ public class DashboardPanel extends JPanel {
         JPanel totalCard=statCard(statIcon(0,new Color(0xFF,0x98,0x00)),"Total Medicines",totalLbl,new Color(0xFF,0x98,0x00),"All medicines in stock",new Color(0x4C,0xAF,0x50),CARD1_BG);
         makeClickable(totalCard,()->navigateTo(1));
         row.add(totalCard);
-        JPanel expCard=statCard(statIcon(1,new Color(0xFF,0xB3,0x00)),"Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Within next 30 days",new Color(0xFF,0x98,0x00),CARD2_BG);
-        makeClickable(expCard,()->showMedicineList("Expiring Soon",getExpiringSoonRows()));
+        JPanel expCard=statCard(statIcon(1,new Color(0xFF,0xB3,0x00)),"Expiring Soon",expLbl,new Color(0xFF,0xB3,0x00),"Red: 1 month, Yellow: 2 months",new Color(0xFF,0x98,0x00),CARD2_BG);
+        makeClickable(expCard,this::showExpiryTabs);
         row.add(expCard);
         JPanel lowCard=statCard(statIcon(2,new Color(0x7B,0x1F,0xA2)),"Low Stock",lowLbl,new Color(0x7B,0x1F,0xA2),"Stock below minimum",new Color(0x9E,0x9E,0x9E),CARD3_BG);
         makeClickable(lowCard,()->showMedicineList("Low Stock Medicines",getLowStockRows()));
@@ -343,8 +365,12 @@ public class DashboardPanel extends JPanel {
                 JOptionPane.showMessageDialog(dlg,"Stock must be zero or more.","Error",JOptionPane.ERROR_MESSAGE);return;}
             try{priceVal=validPrice(pr);}catch(Exception ex){
                 JOptionPane.showMessageDialog(dlg,"Price must be greater than zero.","Error",JOptionPane.ERROR_MESSAGE);return;}
-            if(parseExpiryDate(exp)==null){
+            LocalDate expiryDate=parseExpiryDate(exp);
+            if(expiryDate==null){
                 JOptionPane.showMessageDialog(dlg,"Expiry date must be like MM/YYYY, Jan 2027, or YYYY-MM-DD.","Error",JOptionPane.ERROR_MESSAGE);return;
+            }
+            if(expiryDate.isBefore(LocalDate.now())){
+                JOptionPane.showMessageDialog(dlg,"Expiry date has passed. Cannot add this medicine.","Error",JOptionPane.ERROR_MESSAGE);return;
             }
             int nextId=1006;
             for(int i=0;i<sharedTableModel.getRowCount();i++){
@@ -410,7 +436,7 @@ public class DashboardPanel extends JPanel {
     private List<Object[]> getExpiringSoonRows() {
         List<Object[]> rows=new ArrayList<>();
         LocalDate today=LocalDate.now();
-        LocalDate limit=today.plusDays(30);
+        LocalDate limit=today.plusMonths(2);
         for(int i=0;i<sharedTableModel.getRowCount();i++){
             LocalDate expiry=parseExpiryDate(String.valueOf(sharedTableModel.getValueAt(i,5)));
             if(expiry!=null&&!expiry.isBefore(today)&&!expiry.isAfter(limit)) rows.add(medicineDialogRow(i));
@@ -430,7 +456,7 @@ public class DashboardPanel extends JPanel {
         };
     }
 
-    private LocalDate parseExpiryDate(String text) {
+    private static LocalDate parseExpiryDate(String text) {
         String value=text.trim();
         DateTimeFormatter monthName=DateTimeFormatter.ofPattern("MMM yyyy",Locale.ENGLISH);
         DateTimeFormatter monthNumber=DateTimeFormatter.ofPattern("MM/yyyy",Locale.ENGLISH);
@@ -456,6 +482,7 @@ public class DashboardPanel extends JPanel {
         String[] columns={"ID","Medicine","Category","Stock","Price","Expiry","Status"};
         Object[][] data=rows.toArray(new Object[0][]);
         JTable table=simpleTable(columns,data);
+        if("Expiring Soon".equals(title)) applyExpiryUrgencyRenderer(table);
         JScrollPane sp=new JScrollPane(table);
         sp.setPreferredSize(new Dimension(760,320));
         sp.setBorder(BorderFactory.createLineBorder(BRD));
@@ -819,6 +846,54 @@ public class DashboardPanel extends JPanel {
         }
     }
 
+    private void showExpiryTabs() {
+        loadMedicinesFromDatabase();
+        refreshTable();
+        updateStats();
+        JTabbedPane tabs=new JTabbedPane();
+        tabs.setFont(FB13);
+        tabs.addTab("Expiring Soon", expiryTablePanel(getExpiringSoonRows(),true));
+        tabs.addTab("Expired", expiryTablePanel(DatabaseManager.getExpiredMedicines(),false));
+        tabs.setPreferredSize(new Dimension(780,360));
+        JOptionPane.showMessageDialog(this,tabs,"Expiry Medicines",JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private JPanel expiryTablePanel(List<Object[]> rows,boolean colorByUrgency) {
+        JPanel panel=new JPanel(new BorderLayout());
+        panel.setBackground(WHITE);
+        if(rows.isEmpty()){
+            JLabel empty=new JLabel(colorByUrgency?"No medicines expiring in the next 2 months.":"No expired medicines found.");
+            empty.setFont(F13);
+            empty.setForeground(GRAY);
+            empty.setHorizontalAlignment(SwingConstants.CENTER);
+            panel.add(empty,BorderLayout.CENTER);
+            return panel;
+        }
+        String[] columns={"ID","Medicine","Category","Stock","Price","Expiry","Status"};
+        JTable table=simpleTable(columns,rows.toArray(new Object[0][]));
+        if(colorByUrgency) applyExpiryUrgencyRenderer(table);
+        else applyExpiredRenderer(table);
+        JScrollPane sp=new JScrollPane(table);
+        sp.setBorder(BorderFactory.createLineBorder(BRD));
+        sp.getViewport().setBackground(WHITE);
+        applyTransparentScrollBar(sp);
+        panel.add(sp,BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void applyExpiredRenderer(JTable table) {
+        table.setDefaultRenderer(Object.class,new DefaultTableCellRenderer(){
+            public Component getTableCellRendererComponent(JTable t,Object v,boolean sel,boolean foc,int r,int c){
+                JLabel l=(JLabel)super.getTableCellRendererComponent(t,v,sel,foc,r,c);
+                if(!sel)l.setBackground(new Color(0xFF,0xEB,0xEE));
+                l.setForeground(sel?new Color(180,60,90):RED);
+                l.setOpaque(true);
+                l.setBorder(BorderFactory.createEmptyBorder(0,8,0,8));
+                return l;
+            }
+        });
+    }
+
     private boolean isValidMobile(String mobile) {
         return mobile.isEmpty()||mobile.matches("\\d{10}");
     }
@@ -1038,19 +1113,27 @@ public class DashboardPanel extends JPanel {
 
     JPanel createUsersPage() {
         JPanel p=new JPanel(new BorderLayout(0,12)); p.setOpaque(false);
+        JPanel header=new JPanel(new BorderLayout()); header.setOpaque(false);
         JLabel t=new JLabel(" Users & Login History"); t.setFont(FB16); t.setForeground(DARK);
         t.setIcon(qaIcon(0)); t.setIconTextGap(8);
-        p.add(t,BorderLayout.NORTH);
+        JButton addUser=pinkBtn("+ Add User");
+        addUser.setPreferredSize(new Dimension(120,34));
+        addUser.addActionListener(e->showAddUserDialog());
+        header.add(t,BorderLayout.WEST);
+        header.add(addUser,BorderLayout.EAST);
+        p.add(header,BorderLayout.NORTH);
 
+        List<Object[]> usersData=DatabaseManager.getAllUsers();
+        List<Object[]> loginData=DatabaseManager.getLoginHistory();
         JPanel cards=new JPanel(new GridLayout(1,3,12,0)); cards.setOpaque(false);
-        cards.add(coloredSummaryCard("Users",String.valueOf(DatabaseManager.getAllUsers().size()),qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
-        cards.add(coloredSummaryCard("Login Records",String.valueOf(DatabaseManager.getLoginHistory().size()),sectionIcon(0),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
-        cards.add(coloredSummaryCard("Default Login","admin / admin123",sectionIcon(2),new Color(0xE8,0xF5,0xE9),GREEN));
+        cards.add(coloredSummaryCard("Users",String.valueOf(usersData.size()),qaIcon(0),new Color(0xFF,0xF0,0xF5),PINK));
+        cards.add(coloredSummaryCard("Recent Logins",String.valueOf(loginData.size()),sectionIcon(0),new Color(0xF5,0xF0,0xFF),new Color(0x7B,0x1F,0xA2)));
+        cards.add(coloredSummaryCard("Access","Admin + Staff",sectionIcon(2),new Color(0xE8,0xF5,0xE9),GREEN));
         p.add(cards,BorderLayout.CENTER);
 
         JPanel tables=new JPanel(new GridLayout(1,2,12,0)); tables.setOpaque(false);
-        JTable users=simpleTable(new String[]{"Username","Role","Created"},listRows(DatabaseManager.getAllUsers()));
-        JTable history=simpleTable(new String[]{"Username","Result","Time"},listRows(DatabaseManager.getLoginHistory()));
+        JTable users=simpleTable(new String[]{"Username","Role","Created"},listRows(usersData));
+        JTable history=simpleTable(new String[]{"Username","Result","Time"},listRows(loginData));
         JScrollPane userSp=new JScrollPane(users); userSp.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(BRD),"Users"));
         JScrollPane historySp=new JScrollPane(history); historySp.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(BRD),"Recent Logins"));
         userSp.getViewport().setBackground(WHITE); historySp.getViewport().setBackground(WHITE);
@@ -1058,6 +1141,109 @@ public class DashboardPanel extends JPanel {
         tables.add(userSp); tables.add(historySp);
         p.add(tables,BorderLayout.SOUTH);
         return p;
+    }
+
+    private void showAddUserDialog() {
+        JDialog dlg=new JDialog((Frame)SwingUtilities.getWindowAncestor(this),"Add User",true);
+        dlg.setSize(430,340);
+        dlg.setLocationRelativeTo(this);
+        dlg.setResizable(false);
+        JPanel p=new JPanel();
+        p.setLayout(new BoxLayout(p,BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createEmptyBorder(24,28,24,28));
+        p.setBackground(WHITE);
+        JLabel title=new JLabel("Add User");
+        title.setFont(new Font("Segoe UI",Font.BOLD,20));
+        title.setForeground(DARK);
+        title.setAlignmentX(0f);
+        p.add(title);
+        p.add(Box.createVerticalStrut(18));
+        JTextField username=addField(p,"Username");
+        JPasswordField password=passwordField(p,"Password");
+        JPasswordField confirm=passwordField(p,"Confirm Password");
+        JComboBox<String> role=new JComboBox<>(new String[]{"Staff","Admin"});
+        role.setFont(F13);
+        role.setMaximumSize(new Dimension(Integer.MAX_VALUE,36));
+        JPanel rolePanel=new JPanel(new BorderLayout());
+        rolePanel.setOpaque(false);
+        rolePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE,60));
+        rolePanel.setAlignmentX(0f);
+        JLabel roleLabel=new JLabel("Role");
+        roleLabel.setFont(FB13);
+        roleLabel.setForeground(DARK);
+        rolePanel.add(roleLabel,BorderLayout.NORTH);
+        rolePanel.add(role,BorderLayout.CENTER);
+        p.add(rolePanel);
+        p.add(Box.createVerticalStrut(16));
+        JPanel btns=new JPanel(new FlowLayout(FlowLayout.RIGHT,10,0));
+        btns.setOpaque(false);
+        btns.setAlignmentX(0f);
+        btns.setMaximumSize(new Dimension(Integer.MAX_VALUE,40));
+        JButton cancel=new JButton("Cancel");
+        cancel.setFont(FB13);
+        cancel.setForeground(GRAY);
+        cancel.setBackground(WHITE);
+        cancel.setBorder(BorderFactory.createLineBorder(BRD,1,true));
+        cancel.setPreferredSize(new Dimension(100,36));
+        cancel.addActionListener(e->dlg.dispose());
+        JButton save=pinkBtn("Create User");
+        save.setPreferredSize(new Dimension(130,36));
+        save.addActionListener(e->{
+            String name=username.getText().trim();
+            char[] pass=password.getPassword();
+            char[] pass2=confirm.getPassword();
+            if(name.isEmpty()||pass.length==0||pass2.length==0){
+                JOptionPane.showMessageDialog(dlg,"Please fill all fields.","Add User",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            if(name.length()<3){
+                JOptionPane.showMessageDialog(dlg,"Username must be at least 3 characters.","Add User",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            if(pass.length<4){
+                JOptionPane.showMessageDialog(dlg,"Password must be at least 4 characters.","Add User",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            if(!java.util.Arrays.equals(pass,pass2)){
+                JOptionPane.showMessageDialog(dlg,"Passwords do not match.","Add User",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            if(DatabaseManager.userExists(name)){
+                JOptionPane.showMessageDialog(dlg,"This username already exists.","Add User",JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            DatabaseManager.addUser(name,new String(pass),String.valueOf(role.getSelectedItem()));
+            java.util.Arrays.fill(pass,'\0');
+            java.util.Arrays.fill(pass2,'\0');
+            dlg.dispose();
+            JOptionPane.showMessageDialog(this,"User added successfully. They can now log in.","Add User",JOptionPane.INFORMATION_MESSAGE);
+            navigateTo(6);
+        });
+        btns.add(cancel);
+        btns.add(save);
+        p.add(btns);
+        dlg.setContentPane(p);
+        dlg.setVisible(true);
+    }
+
+    private JPasswordField passwordField(JPanel p,String label) {
+        JPanel fp=new JPanel(new BorderLayout());
+        fp.setOpaque(false);
+        fp.setMaximumSize(new Dimension(Integer.MAX_VALUE,52));
+        fp.setAlignmentX(0f);
+        JLabel l=new JLabel(label);
+        l.setFont(FB13);
+        l.setForeground(DARK);
+        JPasswordField pf=new JPasswordField();
+        pf.setFont(F13);
+        pf.setPreferredSize(new Dimension(0,32));
+        pf.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BRD,1,true),BorderFactory.createEmptyBorder(4,10,4,10)));
+        fp.add(l,BorderLayout.NORTH);
+        fp.add(pf,BorderLayout.CENTER);
+        p.add(fp);
+        p.add(Box.createVerticalStrut(8));
+        return pf;
     }
 
     private Object[][] listRows(List<Object[]> rows) {
@@ -1417,6 +1603,32 @@ public class DashboardPanel extends JPanel {
         return null;
     }
 
+    private void applyExpiryUrgencyRenderer(JTable table) {
+        table.setDefaultRenderer(Object.class,new DefaultTableCellRenderer(){
+            public Component getTableCellRendererComponent(JTable t,Object v,boolean sel,boolean foc,int r,int c){
+                JLabel l=(JLabel)super.getTableCellRendererComponent(t,v,sel,foc,r,c);
+                LocalDate expiry=parseExpiryDate(String.valueOf(t.getValueAt(r,5)));
+                Color fg=DARK;
+                Color bg=r%2==0?WHITE:ALT;
+                if(expiry!=null){
+                    long days=ChronoUnit.DAYS.between(LocalDate.now(),expiry);
+                    if(days<=30){
+                        fg=RED;
+                        bg=new Color(0xFF,0xEB,0xEE);
+                    }else if(days<=62){
+                        fg=BADGE_ORANGE_FG;
+                        bg=new Color(0xFF,0xF8,0xE1);
+                    }
+                }
+                if(!sel)l.setBackground(bg);
+                l.setForeground(sel?new Color(180,60,90):fg);
+                l.setOpaque(true);
+                l.setBorder(BorderFactory.createEmptyBorder(0,8,0,8));
+                return l;
+            }
+        });
+    }
+
     private File ensureExtension(File file,String extension) {
         String path=file.getAbsolutePath();
         if(!path.toLowerCase().endsWith(extension)) return new File(path+extension);
@@ -1707,7 +1919,9 @@ public class DashboardPanel extends JPanel {
             int sv;double pv;
             try{sv=validStock(stk);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Stock must be zero or more!");return;}
             try{pv=validPrice(pr);}catch(Exception ex){JOptionPane.showMessageDialog(dlg,"Price must be greater than zero!");return;}
-            if(parseExpiryDate(exp)==null){JOptionPane.showMessageDialog(dlg,"Expiry date must be like MM/YYYY, Jan 2027, or YYYY-MM-DD.");return;}
+            LocalDate expiryDate=parseExpiryDate(exp);
+            if(expiryDate==null){JOptionPane.showMessageDialog(dlg,"Expiry date must be like MM/YYYY, Jan 2027, or YYYY-MM-DD.");return;}
+            if(expiryDate.isBefore(LocalDate.now())){JOptionPane.showMessageDialog(dlg,"Expiry date has passed. Cannot keep this medicine in stock.");return;}
             Object[] row=new Object[]{
                 sharedTableModel.getValueAt(dataIdx,0),
                 nm,
